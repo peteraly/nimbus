@@ -12,18 +12,18 @@
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <title>Drone Weather Route Planner</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
     <!-- Google Maps API -->
     <script>
       function initMap() {
         window.dispatchEvent(new Event('google-maps-callback'));
       }
     </script>
-    <script async
+    <script defer
       src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB4xjB_OeYCQ-EXs1RsLclVMnPMcl17V7g&libraries=places&callback=initMap">
     </script>
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
   </body>
 </html> 

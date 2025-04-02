@@ -45,20 +45,29 @@ export const getWeatherForecast = async (location, apiKey) => {
   }
 
   try {
-    // Get 7-day forecast from OpenWeatherMap
+    // Get 7-day forecast from OpenWeatherMap using the 5-day forecast endpoint
     const response = await axios.get(
-      `https://api.openweathermap.org/data/2.5/forecast/daily?lat=${location.lat}&lon=${location.lng}&cnt=7&units=imperial&appid=${apiKey}`
+      `https://api.openweathermap.org/data/2.5/forecast?lat=${location.lat}&lon=${location.lng}&units=imperial&appid=${apiKey}`
     );
 
-    const forecast = response.data.list.map(day => ({
-      date: new Date(day.dt * 1000),
-      temperature: day.temp.day,
-      wind_speed: day.speed,
-      precipitation: day.rain || 0,
-      visibility: day.visibility / 1609.34, // Convert meters to miles
-      weather: day.weather[0].main,
-      description: day.weather[0].description
-    }));
+    // Group forecast data by day
+    const dailyForecasts = {};
+    response.data.list.forEach(item => {
+      const date = new Date(item.dt * 1000).toLocaleDateString();
+      if (!dailyForecasts[date]) {
+        dailyForecasts[date] = {
+          date: new Date(item.dt * 1000),
+          temperature: item.main.temp,
+          wind_speed: item.wind.speed,
+          precipitation: item.rain ? item.rain['3h'] / 3 : 0, // Convert 3h rain to hourly
+          visibility: item.visibility / 1609.34, // Convert meters to miles
+          weather: item.weather[0].main,
+          description: item.weather[0].description
+        };
+      }
+    });
+
+    const forecast = Object.values(dailyForecasts).slice(0, 7); // Get up to 7 days
 
     const data = {
       timestamp: Date.now(),
@@ -122,20 +131,6 @@ const calculateWeatherScore = (day) => {
   if (day.temperature < 40 || day.temperature > 90) score -= 25;
 
   return score;
-};
-
-// Get real-time weather alerts for a location
-export const getWeatherAlerts = async (location, apiKey) => {
-  try {
-    const response = await axios.get(
-      `https://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${location.lat},${location.lng}&days=7&aqi=no`
-    );
-
-    return response.data.alerts?.alert || [];
-  } catch (error) {
-    console.error('Error fetching weather alerts:', error);
-    return [];
-  }
 };
 
 // Check if weather conditions require immediate rerouting

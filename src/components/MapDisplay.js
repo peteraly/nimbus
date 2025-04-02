@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { GoogleMap, Marker, Polyline } from '@react-google-maps/api';
+import { GoogleMap, Marker, DirectionsRenderer, useJsApiLoader } from '@react-google-maps/api';
 import { Box, Spinner, useColorModeValue } from '@chakra-ui/react';
 
 const mapContainerStyle = {
@@ -12,69 +12,55 @@ const defaultCenter = {
   lng: -74.0060,
 };
 
-function MapDisplay({ locations, route, settings, onRouteUpdate, isLoaded, loadError }) {
+const libraries = ['places', 'directions'];
+
+function MapDisplay({ locations, route, settings }) {
   const [map, setMap] = useState(null);
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
 
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
+    libraries,
+  });
+
   const onLoad = useCallback((map) => {
+    console.log('Map loaded');
     setMap(map);
   }, []);
 
   const onUnmount = useCallback(() => {
+    console.log('Map unmounted');
     setMap(null);
   }, []);
 
   useEffect(() => {
     if (map && locations.length > 0) {
+      console.log('Adjusting map bounds for locations:', locations);
       const bounds = new window.google.maps.LatLngBounds();
       locations.forEach((location) => {
-        bounds.extend(location);
+        console.log('Extending bounds for location:', location);
+        bounds.extend({ lat: parseFloat(location.lat), lng: parseFloat(location.lng) });
       });
       map.fitBounds(bounds);
     }
   }, [map, locations]);
 
   useEffect(() => {
-    if (map && locations.length >= 2) {
-      const directionsService = new window.google.maps.DirectionsService();
-      const directionsRenderer = new window.google.maps.DirectionsRenderer({
-        map,
-        suppressMarkers: true,
-      });
-
-      const waypoints = locations.slice(1, -1).map(location => ({
-        location: new window.google.maps.LatLng(location.lat, location.lng),
-        stopover: true,
-      }));
-
-      directionsService.route(
-        {
-          origin: new window.google.maps.LatLng(locations[0].lat, locations[0].lng),
-          destination: new window.google.maps.LatLng(
-            locations[locations.length - 1].lat,
-            locations[locations.length - 1].lng
-          ),
-          waypoints,
-          optimizeWaypoints: true,
-          travelMode: window.google.maps.TravelMode.DRIVING,
-        },
-        (result, status) => {
-          if (status === 'OK') {
-            directionsRenderer.setDirections(result);
-            onRouteUpdate(result.routes[0].overview_path);
-          }
-        }
-      );
-
-      return () => {
-        directionsRenderer.setMap(null);
-      };
+    console.log('Route updated:', route);
+    if (route?.directions) {
+      console.log('Route directions present:', route.directions);
     }
-  }, [map, locations, onRouteUpdate]);
+  }, [route]);
 
-  if (loadError) return <div>Error loading maps</div>;
-  if (!isLoaded) return <Spinner />;
+  if (loadError) {
+    console.error('Error loading maps:', loadError);
+    return <Box p={6}>Error loading maps</Box>;
+  }
+
+  if (!isLoaded) {
+    return <Box p={6}><Spinner /></Box>;
+  }
 
   return (
     <Box p={6} bg={bgColor} borderRadius="lg" borderWidth={1} borderColor={borderColor}>
@@ -92,28 +78,37 @@ function MapDisplay({ locations, route, settings, onRouteUpdate, isLoaded, loadE
               stylers: [{ color: '#000000' }]
             }
           ],
-          disableDefaultUI: true,
+          disableDefaultUI: false,
           zoomControl: true,
           streetViewControl: true,
           mapTypeControl: true,
           fullscreenControl: true
         }}
       >
-        {locations.map((location, index) => (
-          <Marker
-            key={index}
-            position={location}
-            label={(index + 1).toString()}
-          />
-        ))}
+        {!route && locations.map((location, index) => {
+          console.log('Rendering marker for location:', location);
+          return (
+            <Marker
+              key={index}
+              position={{ 
+                lat: parseFloat(location.lat), 
+                lng: parseFloat(location.lng) 
+              }}
+              label={(index + 1).toString()}
+            />
+          );
+        })}
 
-        {route && route.length > 0 && (
-          <Polyline
-            path={route}
+        {route?.directions && (
+          <DirectionsRenderer
+            directions={route.directions}
             options={{
-              strokeColor: '#FF0000',
-              strokeOpacity: 0.8,
-              strokeWeight: 2
+              suppressMarkers: false,
+              polylineOptions: {
+                strokeColor: '#FF0000',
+                strokeOpacity: 0.8,
+                strokeWeight: 3
+              }
             }}
           />
         )}

@@ -5,17 +5,13 @@ import {
   Heading,
   Text,
   SimpleGrid,
-  Alert,
-  AlertIcon,
-  AlertTitle,
-  AlertDescription,
   useColorModeValue,
   Spinner,
 } from '@chakra-ui/react';
 import { format } from 'date-fns';
 import { WiDaySunny, WiCloudy, WiRain, WiSnow, WiFog } from 'react-icons/wi';
 
-function WeatherForecast({ locations, alerts }) {
+function WeatherForecast({ locations }) {
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
   const locationBgColor = useColorModeValue('gray.50', 'gray.700');
@@ -33,72 +29,67 @@ function WeatherForecast({ locations, alerts }) {
       <VStack spacing={6} align="stretch">
         <Heading size="md">Weather Forecast</Heading>
 
-        {alerts && alerts.length > 0 && (
-          <Box>
-            <Heading size="sm" mb={4}>Weather Alerts</Heading>
-            {alerts.map((alert, index) => (
-              <Alert key={index} status="warning" mb={2}>
-                <AlertIcon />
-                <Box>
-                  <AlertTitle>{alert.title}</AlertTitle>
-                  <AlertDescription>{alert.description}</AlertDescription>
-                </Box>
-              </Alert>
-            ))}
-          </Box>
-        )}
-
-        <Box>
-          <Heading size="sm" mb={4}>Location Forecasts</Heading>
-          <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={6}>
-            {locations.map((location, index) => (
-              <Box key={index} p={4} bg={locationBgColor} borderRadius="md">
-                <Text fontWeight="bold" mb={2}>{location.address}</Text>
-                {location.forecast ? (
-                  <SimpleGrid columns={5} spacing={2}>
-                    {location.forecast.map((day, dayIndex) => (
-                      <Box key={dayIndex} textAlign="center">
-                        <Text fontSize="sm" color="gray.500">
-                          {format(new Date(day.date), 'EEE')}
-                        </Text>
-                        {getWeatherIcon(day.condition)}
-                        <Text fontSize="sm">{Math.round(day.temperature)}°F</Text>
-                        <Text fontSize="xs" color="gray.500">
-                          {Math.round(day.windSpeed)} mph
-                        </Text>
-                      </Box>
-                    ))}
-                  </SimpleGrid>
-                ) : (
-                  <Box textAlign="center" py={4}>
-                    <Spinner size="sm" mr={2} />
-                    <Text display="inline">Loading forecast...</Text>
+        {locations.map((location, index) => (
+          <Box key={index} p={4} bg={locationBgColor} borderRadius="md">
+            <Text fontWeight="bold" mb={2}>{location.address}</Text>
+            {location.forecast && Array.isArray(location.forecast) && location.forecast.length > 0 ? (
+              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                {location.forecast.map((day, dayIndex) => (
+                  <Box key={dayIndex} p={2}>
+                    <Text fontSize="sm" color="gray.500">
+                      {format(new Date(day.date), 'MMM d, yyyy')}
+                    </Text>
+                    <Box display="flex" alignItems="center" gap={2}>
+                      {getWeatherIcon(day?.weather)}
+                      <Text>{Math.round(day?.temperature || 0)}°F</Text>
+                    </Box>
+                    <Text fontSize="sm">
+                      Wind: {Math.round(day?.wind_speed || 0)} mph
+                    </Text>
+                    {day?.precipitation > 0 && (
+                      <Text fontSize="sm" color="blue.500">
+                        Rain: {(day.precipitation || 0).toFixed(1)} mm/h
+                      </Text>
+                    )}
                   </Box>
-                )}
+                ))}
+              </SimpleGrid>
+            ) : (
+              <Box display="flex" justifyContent="center" p={4}>
+                <Spinner />
               </Box>
-            ))}
-          </SimpleGrid>
-        </Box>
+            )}
+          </Box>
+        ))}
       </VStack>
     </Box>
   );
 }
 
 function getWeatherIcon(condition) {
-  const iconSize = 24;
-  switch (condition?.toLowerCase()) {
-    case 'clear':
-      return <WiDaySunny size={iconSize} />;
-    case 'cloudy':
-      return <WiCloudy size={iconSize} />;
-    case 'rain':
-      return <WiRain size={iconSize} />;
-    case 'snow':
-      return <WiSnow size={iconSize} />;
-    case 'fog':
-      return <WiFog size={iconSize} />;
-    default:
-      return <WiDaySunny size={iconSize} />;
+  if (!condition) return <WiDaySunny size={24} />;
+  
+  try {
+    switch (condition.toLowerCase()) {
+      case 'clear':
+        return <WiDaySunny size={24} />;
+      case 'clouds':
+      case 'cloudy':
+        return <WiCloudy size={24} />;
+      case 'rain':
+      case 'drizzle':
+        return <WiRain size={24} />;
+      case 'snow':
+        return <WiSnow size={24} />;
+      case 'fog':
+      case 'mist':
+        return <WiFog size={24} />;
+      default:
+        return <WiDaySunny size={24} />;
+    }
+  } catch (error) {
+    console.error('Error getting weather icon:', error);
+    return <WiDaySunny size={24} />;
   }
 }
 
