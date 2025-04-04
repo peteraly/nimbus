@@ -75,15 +75,12 @@ function Dashboard() {
 
     const loadMaps = async () => {
       try {
-        console.log('Starting to load Google Maps API...');
         await loadGoogleMapsAPI();
         if (mounted) {
-          console.log('Setting mapsLoaded to true');
           setMapsLoaded(true);
           setMapsError(null);
         }
       } catch (error) {
-        console.error('Error loading Google Maps API:', error);
         if (mounted) {
           setMapsError(error.message);
           toast({
@@ -106,54 +103,20 @@ function Dashboard() {
 
   // Calculate route when locations change
   useEffect(() => {
-    console.log('=== Route Calculation Effect ===');
-    console.log('Effect triggered with:', {
-      locationsCount: locations.length,
-      isCalculating,
-      mapsLoaded,
-      mapsError,
-      hasRoute: !!route,
-      hasStats: !!routeStats,
-      locations: locations.map(l => ({
-        address: l.address,
-        hasForecast: !!l.forecast,
-        hasCoords: !!l.lat && !!l.lng
-      }))
-    });
-
     const calculateRouteIfNeeded = async () => {
-      console.log('=== calculateRouteIfNeeded Debug ===');
-      console.log('Current state:', {
-        locationsCount: locations.length,
-        isCalculating,
-        mapsLoaded,
-        mapsError,
-        hasRoute: !!route,
-        hasStats: !!routeStats,
-        locations: locations.map(l => ({
-          address: l.address,
-          hasForecast: !!l.forecast,
-          hasCoords: !!l.lat && !!l.lng
-        }))
-      });
-
       if (!mapsLoaded) {
-        console.log('Google Maps API not loaded yet');
         return;
       }
 
       if (mapsError) {
-        console.log('Google Maps API error:', mapsError);
         return;
       }
 
       if (isCalculating) {
-        console.log('Route calculation already in progress');
         return;
       }
 
       if (locations.length < 2) {
-        console.log('Not enough locations for route calculation');
         setRouteOptions([]);
         setRoute(null);
         setRouteStats(null);
@@ -162,24 +125,12 @@ function Dashboard() {
 
       try {
         setIsCalculating(true);
-        console.log('Starting route calculation with locations:', locations.map(l => ({
-          address: l.address,
-          hasForecast: !!l.forecast,
-          hasCoords: !!l.lat && !!l.lng
-        })));
-
-        // Generate route options first
-        const options = await generateRouteOptions(locations);
-        console.log('Generated route options:', options);
-        setRouteOptions(options);
+        const optimizedRoute = await getOptimizedRoute(locations);
         
-        // Select the first option by default (usually the safety-first option)
-        if (options.length > 0) {
-          setSelectedRouteIndex(0);
-          const optimizedRoute = options[0];
-          console.log('Using first route option:', optimizedRoute);
-
-          const stats = {
+        if (optimizedRoute) {
+          setRouteOptions([optimizedRoute]);
+          setRoute(optimizedRoute);
+          setRouteStats({
             totalStops: optimizedRoute.route.length,
             safeStops: optimizedRoute.weatherScores.filter(s => s.score > 70).length,
             moderateStops: optimizedRoute.weatherScores.filter(s => s.score > 40 && s.score <= 70).length,
@@ -187,32 +138,16 @@ function Dashboard() {
             totalDistance: optimizedRoute.distance,
             totalDuration: optimizedRoute.duration,
             safetyPercentage: optimizedRoute.safetyPercentage
-          };
-
-          console.log('Setting route and stats:', {
-            route: optimizedRoute,
-            stats
           });
-
-          setRoute(optimizedRoute);
-          setRouteStats(stats);
-        } else {
-          console.log('No route options generated');
-          setRoute(null);
-          setRouteStats(null);
         }
       } catch (error) {
-        console.error('Error calculating route:', error);
         toast({
-          title: 'Error calculating route',
-          description: 'Failed to calculate the optimal route. Please try again.',
+          title: 'Error',
+          description: 'Failed to calculate route. Please try again.',
           status: 'error',
           duration: 5000,
           isClosable: true,
         });
-        setRouteOptions([]);
-        setRoute(null);
-        setRouteStats(null);
       } finally {
         setIsCalculating(false);
       }
@@ -223,11 +158,9 @@ function Dashboard() {
 
   const handleLocationAdd = async (location) => {
     try {
-      console.log('Adding new location:', location);
       const weatherApiKey = process.env.REACT_APP_OPENWEATHER_API_KEY;
       
       if (!weatherApiKey) {
-        console.log('No OpenWeather API key, using mock data');
         // Create mock hourly forecast data for 7 days
         const mockForecast = Array(7).fill().map((_, dayIndex) => {
           const dayForecast = Array(24).fill().map((_, hourIndex) => ({
@@ -243,8 +176,6 @@ function Dashboard() {
           return dayForecast;
         }).flat();
         
-        console.log('Generated mock forecast with hours:', mockForecast.length);
-        
         const newLocation = {
           ...location,
           forecast: mockForecast,
@@ -252,7 +183,6 @@ function Dashboard() {
           lng: parseFloat(location.lng)
         };
         
-        console.log('Adding location with mock forecast:', newLocation);
         setLocations(prevLocations => [...prevLocations, newLocation]);
         return;
       }
@@ -267,44 +197,33 @@ function Dashboard() {
       }
       
       const data = await response.json();
-      console.log('Weather forecast received:', data);
-      console.log('Number of 3-hour intervals:', data.list.length);
       
       // Process the forecast data to include all necessary information
-      // OpenWeather API returns data in 3-hour intervals, so we need to generate hourly data
       const hourlyForecast = [];
       
-      // Process each 3-hour interval
       data.list.forEach((item, index) => {
         const currentTime = new Date(item.dt * 1000);
-        const nextTime = index < data.list.length - 1 
-          ? new Date(data.list[index + 1].dt * 1000) 
-          : new Date(currentTime.getTime() + 3 * 3600000); // If last item, add 3 hours
         
-        // Generate hourly data for this 3-hour interval
+        // Interpolate data for each hour
         for (let hour = 0; hour < 3; hour++) {
           const hourTime = new Date(currentTime.getTime() + hour * 3600000);
           
-          // Skip if this hour is beyond the next interval
-          if (hourTime >= nextTime) continue;
-          
-          // Interpolate values for this hour
-          const progress = hour / 3; // 0 to 1
-          const nextItem = index < data.list.length - 1 ? data.list[index + 1] : item;
-          
           // Interpolate temperature
-          const tempDiff = nextItem.main.temp - item.main.temp;
-          const interpolatedTemp = item.main.temp + tempDiff * progress;
+          const nextItem = data.list[index + 1];
+          const interpolatedTemp = nextItem ? 
+            item.main.temp + (nextItem.main.temp - item.main.temp) * (hour / 3) :
+            item.main.temp;
           
           // Interpolate wind speed
-          const windDiff = nextItem.wind.speed - item.wind.speed;
-          const interpolatedWind = item.wind.speed + windDiff * progress;
+          const interpolatedWind = nextItem ?
+            item.wind.speed + (nextItem.wind.speed - item.wind.speed) * (hour / 3) :
+            item.wind.speed;
           
-          // For precipitation, divide the 3h value by 3 for hourly
-          const hourlyPrecip = (item.rain?.['3h'] || 0) / 3;
+          // Calculate hourly precipitation
+          const hourlyPrecip = item.rain ? (item.rain['3h'] || 0) / 3 : 0;
           
-          // For visibility, use the current value
-          const visibility = item.visibility;
+          // Get visibility (in meters)
+          const visibility = item.visibility || 10000;
           
           // Add the hourly forecast
           hourlyForecast.push({
@@ -322,8 +241,6 @@ function Dashboard() {
         }
       });
       
-      console.log('Generated hourly forecast with hours:', hourlyForecast.length);
-      
       const newLocation = {
         ...location,
         forecast: hourlyForecast,
@@ -331,10 +248,8 @@ function Dashboard() {
         lng: parseFloat(location.lng)
       };
       
-      console.log('Adding location with real forecast:', newLocation);
       setLocations(prevLocations => [...prevLocations, newLocation]);
     } catch (error) {
-      console.error('Error adding location:', error);
       toast({
         title: 'Error',
         description: 'Failed to add location. Please try again.',

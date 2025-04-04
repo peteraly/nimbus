@@ -40,10 +40,10 @@ const mockForecast = [
 ];
 
 // Cache duration in milliseconds (1 hour)
-const CACHE_DURATION = 3600000;
+// const CACHE_DURATION = 3600000;
 
 // Weather data cache
-const weatherCache = new Map();
+// const weatherCache = new Map();
 
 // Check if weather data is safe for drone operations
 export const isWeatherSafe = (weatherData, thresholds = DEFAULT_THRESHOLDS) => {

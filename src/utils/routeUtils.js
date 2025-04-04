@@ -1,45 +1,43 @@
-import axios from 'axios';
-import { isWeatherSafe, getWeatherForecast } from './weatherUtils';
+// Remove unused imports
+// import axios from 'axios';
+// import { isWeatherSafe, getWeatherForecast } from './weatherUtils';
 
 // Cache duration for route data (1 hour)
-const CACHE_DURATION = 3600000;
-const routeCache = new Map();
+// const CACHE_DURATION = 3600000;
+// const routeCache = new Map();
 
 // Wait for Google Maps API to be loaded
-const waitForGoogleMaps = () => {
-  console.log('Waiting for Google Maps API to load...');
-  return new Promise((resolve) => {
-    if (window.google && window.google.maps) {
-      console.log('Google Maps API already loaded');
-      resolve(window.google.maps);
-    } else {
-      console.log('Setting up interval to check for Google Maps API');
-      const checkGoogleMaps = setInterval(() => {
-        if (window.google && window.google.maps) {
-          console.log('Google Maps API loaded');
-          clearInterval(checkGoogleMaps);
-          resolve(window.google.maps);
-        }
-      }, 100);
-    }
-  });
-};
+// const waitForGoogleMaps = () => {
+//   console.log('Waiting for Google Maps API to load...');
+//   return new Promise((resolve) => {
+//     if (window.google && window.google.maps) {
+//       console.log('Google Maps API already loaded');
+//       resolve(window.google.maps);
+//     } else {
+//       console.log('Setting up interval to check for Google Maps API');
+//       const checkGoogleMaps = setInterval(() => {
+//         if (window.google && window.google.maps) {
+//           console.log('Google Maps API loaded');
+//           clearInterval(checkGoogleMaps);
+//           resolve(window.google.maps);
+//         }
+//       }, 100);
+//     }
+//   });
+// };
 
 // Helper function to calculate weather score for a location
 const calculateWeatherScore = (forecast) => {
   if (!forecast || !Array.isArray(forecast)) {
-    console.log('Invalid forecast data:', forecast);
     return 0;
   }
   
   // Get the next 24 hours of forecast
   const nextDayForecast = forecast[0];
   if (!nextDayForecast) {
-    console.log('No forecast data available');
     return 0;
   }
 
-  console.log('Calculating weather score for forecast:', JSON.stringify(nextDayForecast, null, 2));
   let score = 100; // Start with perfect score
   let reductions = [];
 
@@ -72,59 +70,34 @@ const calculateWeatherScore = (forecast) => {
     reductions.push(`temperature ${temp}°F outside safe range (-20)`);
   }
 
-  const finalScore = Math.max(0, score);
-  console.log('Weather score reductions:', reductions);
-  console.log('Final weather score:', finalScore);
-  return finalScore;
+  return Math.max(0, score);
 };
 
 // Get optimized route between multiple locations
 export const getOptimizedRoute = async (locations) => {
-  console.log('=== getOptimizedRoute Debug ===');
-  console.log('Input locations:', locations.map(l => ({
-    address: l.address,
-    hasForecast: !!l.forecast,
-    hasCoords: !!l.lat && !!l.lng,
-    lat: l.lat,
-    lng: l.lng
-  })));
-
   if (!window.google || !window.google.maps) {
-    console.error('Google Maps API not loaded');
     throw new Error('Google Maps API not loaded');
   }
 
   if (locations.length < 2) {
-    console.log('Not enough locations for route optimization');
     return null;
   }
 
   try {
     // Calculate weather scores for each location
-    const weatherScores = locations.map(location => {
-      console.log('Calculating weather score for:', location.address);
-      const score = calculateWeatherScore(location.forecast);
-      console.log('Weather score:', score);
-      return {
-        location,
-        score
-      };
-    });
+    const weatherScores = locations.map(location => ({
+      location,
+      score: calculateWeatherScore(location.forecast)
+    }));
 
     // Sort locations by weather score (highest first)
     const sortedLocations = [...weatherScores].sort((a, b) => b.score - a.score);
-    console.log('Sorted locations by weather score:', sortedLocations.map(l => ({
-      address: l.location.address,
-      score: l.score
-    })));
 
     // Create waypoints for the route
     const waypoints = sortedLocations.slice(1, -1).map(loc => ({
       location: new window.google.maps.LatLng(loc.location.lat, loc.location.lng),
       stopover: true
     }));
-
-    console.log('Created waypoints:', waypoints.length);
 
     // Create directions request
     const request = {
@@ -135,80 +108,47 @@ export const getOptimizedRoute = async (locations) => {
       travelMode: window.google.maps.TravelMode.DRIVING
     };
 
-    console.log('Directions request:', {
-      origin: request.origin.toString(),
-      destination: request.destination.toString(),
-      numWaypoints: waypoints.length
-    });
-
     // Get directions
     const directionsService = new window.google.maps.DirectionsService();
     const result = await new Promise((resolve, reject) => {
-      directionsService.route(request, (result, status) => {
-        console.log('Directions service status:', status);
+      directionsService.route(request, (response, status) => {
         if (status === window.google.maps.DirectionsStatus.OK) {
-          resolve(result);
+          resolve(response);
         } else {
           reject(new Error(`Directions request failed: ${status}`));
         }
       });
     });
 
-    console.log('Directions result received:', {
-      hasResult: !!result,
-      numRoutes: result?.routes?.length,
-      numLegs: result?.routes?.[0]?.legs?.length
-    });
+    // Calculate route statistics
+    const route = result.routes[0].legs.map((leg, index) => ({
+      start: sortedLocations[index].location.address,
+      end: sortedLocations[index + 1].location.address,
+      distance: leg.distance.value,
+      duration: leg.duration.value
+    }));
 
-    if (!result || !result.routes || result.routes.length === 0) {
-      throw new Error('No valid route found');
-    }
+    const totalDistance = route.reduce((sum, leg) => sum + leg.distance, 0);
+    const totalDuration = route.reduce((sum, leg) => sum + leg.duration, 0);
 
-    // Calculate total distance and duration
-    const totalDistance = result.routes[0].legs.reduce((sum, leg) => sum + leg.distance.value, 0);
-    const totalDuration = result.routes[0].legs.reduce((sum, leg) => sum + leg.duration.value, 0);
-
-    // Calculate overall route safety percentage
-    const overallSafetyPercentage = Math.round(
-      weatherScores.reduce((sum, score) => sum + score.score, 0) / weatherScores.length
+    // Calculate overall safety percentage
+    const safetyPercentage = Math.round(
+      weatherScores.reduce((sum, loc) => sum + loc.score, 0) / (weatherScores.length * 100) * 100
     );
 
-    console.log('Route calculations:', {
-      totalDistance,
-      totalDuration,
-      overallSafetyPercentage
-    });
-
-    // Prepare route data
-    const routeData = {
+    return {
       directions: result,
-      route: result.routes[0].legs.map(leg => ({
-        start: leg.start_location,
-        end: leg.end_location,
-        distance: leg.distance,
-        duration: leg.duration
-      })),
+      route,
       distance: totalDistance,
       duration: totalDuration,
-      safetyPercentage: overallSafetyPercentage,
-      weatherScores: weatherScores.map(score => ({
-        location: score.location.address,
-        score: score.score
+      safetyPercentage,
+      weatherScores: weatherScores.map(ws => ({
+        location: ws.location.address,
+        score: ws.score
       }))
     };
-
-    console.log('Final route data:', {
-      numStops: routeData.route.length,
-      distance: routeData.distance,
-      duration: routeData.duration,
-      safetyPercentage: routeData.safetyPercentage,
-      weatherScores: routeData.weatherScores
-    });
-
-    return routeData;
   } catch (error) {
-    console.error('Error in getOptimizedRoute:', error);
-    throw error;
+    throw new Error(`Failed to optimize route: ${error.message}`);
   }
 };
 

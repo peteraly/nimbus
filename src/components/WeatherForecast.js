@@ -13,8 +13,6 @@ import {
 import { format, isToday, isTomorrow } from 'date-fns';
 
 function WeatherForecast({ locations }) {
-  console.log('WeatherForecast received locations:', locations);
-  
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
   const locationBgColor = useColorModeValue('gray.50', 'gray.700');
@@ -29,7 +27,6 @@ function WeatherForecast({ locations }) {
 
   // Group forecast data by day for each location
   const getDailyForecasts = (forecast) => {
-    console.log('Processing forecast data:', forecast);
     const dailyForecasts = {};
     forecast.forEach(item => {
       const date = new Date(item.date);
@@ -39,8 +36,6 @@ function WeatherForecast({ locations }) {
       }
       dailyForecasts[dateKey].push(item);
     });
-    
-    console.log('Grouped forecasts by day:', dailyForecasts);
     
     // Sort days chronologically
     return Object.keys(dailyForecasts)
@@ -75,10 +70,8 @@ function WeatherForecast({ locations }) {
         <Heading size="md">Weather Forecast</Heading>
 
         {locations.map((location, index) => {
-          console.log(`Processing location ${index}:`, location.address);
           const dailyForecasts = location.forecast ? getDailyForecasts(location.forecast) : {};
           const sortedDays = Object.keys(dailyForecasts).slice(0, 6); // Get current day + 5 days
-          console.log(`Sorted days for ${location.address}:`, sortedDays);
           
           return (
             <Box key={index} p={4} bg={locationBgColor} borderRadius="md">
@@ -88,7 +81,6 @@ function WeatherForecast({ locations }) {
                   {sortedDays.map((dateKey) => {
                     const hours = dailyForecasts[dateKey];
                     const isCurrentDay = isToday(new Date(dateKey));
-                    console.log(`Hours for ${dateKey}:`, hours.length);
                     
                     return (
                       <Box key={dateKey}>
