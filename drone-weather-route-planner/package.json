@@ -1,21 +1,18 @@
 {
   "name": "drone-weather-route-planner",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Weather-based drone route planning dashboard",
   "private": true,
   "dependencies": {
-    "@chakra-ui/icons": "^2.1.1",
     "@chakra-ui/react": "^2.8.2",
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
-    "@googlemaps/google-maps-services-js": "^3.3.42",
-    "@react-google-maps/api": "^2.19.2",
-    "framer-motion": "^11.0.3",
+    "axios": "^1.6.7",
+    "framer-motion": "^11.0.5",
+    "mapbox-gl": "^3.1.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-icons": "^5.0.1",
-    "react-icons/wi": "^4.12.0",
-    "react-router-dom": "^6.22.0",
+    "react-map-gl": "^7.1.7",
     "react-scripts": "5.0.1"
   },
   "scripts": {

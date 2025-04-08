@@ -12,7 +12,7 @@ import {
   useColorModeValue,
   Icon,
 } from '@chakra-ui/react';
-import { FaRoute, FaClock, FaWind, FaInfoCircle } from 'react-icons/fa';
+import { FaRoute, FaClock, FaInfoCircle } from 'react-icons/fa';
 
 const RouteOptions = ({ route, onSelectRoute, selectedRouteIndex }) => {
   const bgColor = useColorModeValue('white', 'gray.800');
@@ -52,14 +52,20 @@ const RouteOptions = ({ route, onSelectRoute, selectedRouteIndex }) => {
     {
       name: 'Weather-Optimized Route',
       description: 'Route optimized for best weather conditions',
-      safetyPercentage: route.safetyPercentage,
-      distance: route.distance,
-      duration: route.duration,
-      weatherScore: route.safetyPercentage,
-      route: route.route,
-      weatherHighlights: `Overall safety score: ${route.safetyPercentage}%`
+      safetyPercentage: route.safetyPercentage || 0,
+      distance: route.distance || 0,
+      duration: route.duration || 0,
+      weatherScore: route.safetyPercentage || 0,
+      route: route.route || [],
+      weatherHighlights: `Overall safety score: ${route.safetyPercentage || 0}%`
     }
   ];
+
+  // Ensure selectedRouteIndex is valid
+  const validSelectedIndex = selectedRouteIndex !== undefined && 
+                            selectedRouteIndex >= 0 && 
+                            selectedRouteIndex < routeOptions.length ? 
+                            selectedRouteIndex : 0;
 
   return (
     <Box>
@@ -67,16 +73,16 @@ const RouteOptions = ({ route, onSelectRoute, selectedRouteIndex }) => {
         Select your preferred route based on weather conditions and travel distance.
       </Text>
       
-      <RadioGroup value={selectedRouteIndex.toString()} onChange={(value) => onSelectRoute(parseInt(value))}>
+      <RadioGroup value={validSelectedIndex.toString()} onChange={(value) => onSelectRoute(parseInt(value))}>
         <VStack spacing={4} align="stretch">
           {routeOptions.map((option, index) => (
             <Box
               key={index}
               p={4}
               borderWidth={1}
-              borderColor={selectedRouteIndex === index ? 'blue.500' : borderColor}
+              borderColor={validSelectedIndex === index ? 'blue.500' : borderColor}
               borderRadius="md"
-              bg={selectedRouteIndex === index ? 'blue.50' : bgColor}
+              bg={validSelectedIndex === index ? 'blue.50' : bgColor}
               _hover={{ bg: hoverBgColor }}
               transition="all 0.2s"
               cursor="pointer"
@@ -101,54 +107,29 @@ const RouteOptions = ({ route, onSelectRoute, selectedRouteIndex }) => {
                   
                   <Text fontSize="sm" color="gray.600">{option.description}</Text>
                   
-                  <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4} width="100%" mt={2}>
-                    <HStack>
-                      <Icon as={FaRoute} color="blue.500" />
-                      <VStack align="start" spacing={0}>
-                        <Text fontSize="xs" color="gray.500">Distance</Text>
-                        <Text fontWeight="bold">{formatDistance(option.distance)}</Text>
-                      </VStack>
-                    </HStack>
-                    
-                    <HStack>
-                      <Icon as={FaClock} color="blue.500" />
-                      <VStack align="start" spacing={0}>
-                        <Text fontSize="xs" color="gray.500">Duration</Text>
-                        <Text fontWeight="bold">{formatDuration(Math.round(option.duration / 60))}</Text>
-                      </VStack>
-                    </HStack>
-                    
-                    <HStack>
-                      <Icon as={FaWind} color="blue.500" />
-                      <VStack align="start" spacing={0}>
-                        <Text fontSize="xs" color="gray.500">Weather Score</Text>
-                        <Text fontWeight="bold">{option.weatherScore}%</Text>
-                      </VStack>
-                    </HStack>
-                    
-                    <HStack>
-                      <Icon as={FaInfoCircle} color="blue.500" />
-                      <VStack align="start" spacing={0}>
-                        <Text fontSize="xs" color="gray.500">Stops</Text>
-                        <Text fontWeight="bold">{option.route.length}</Text>
-                      </VStack>
-                    </HStack>
+                  <SimpleGrid columns={2} spacing={4} width="100%">
+                    <Box>
+                      <HStack>
+                        <Icon as={FaRoute} color="blue.500" />
+                        <Text fontWeight="bold">Distance</Text>
+                      </HStack>
+                      <Text>{formatDistance(option.distance)}</Text>
+                    </Box>
+                    <Box>
+                      <HStack>
+                        <Icon as={FaClock} color="blue.500" />
+                        <Text fontWeight="bold">Duration</Text>
+                      </HStack>
+                      <Text>{formatDuration(Math.round(option.duration / 60))}</Text>
+                    </Box>
                   </SimpleGrid>
                   
-                  <Box width="100%" mt={2}>
-                    <Text fontSize="sm" fontWeight="bold">Route Order:</Text>
-                    <HStack spacing={2} mt={1} flexWrap="wrap">
-                      {option.route.map((stop, i) => (
-                        <Badge key={i} colorScheme="blue" borderRadius="full">
-                          {i + 1}. {stop.address || `Stop ${i + 1}`}
-                        </Badge>
-                      ))}
+                  <Box width="100%">
+                    <HStack>
+                      <Icon as={FaInfoCircle} color="blue.500" />
+                      <Text fontWeight="bold">Weather Highlights</Text>
                     </HStack>
-                  </Box>
-                  
-                  <Box width="100%" mt={2}>
-                    <Text fontSize="sm" fontWeight="bold">Weather Highlights:</Text>
-                    <Text fontSize="sm" mt={1}>{option.weatherHighlights}</Text>
+                    <Text fontSize="sm">{option.weatherHighlights}</Text>
                   </Box>
                 </VStack>
               </HStack>

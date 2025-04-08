@@ -16,13 +16,12 @@ mkdir -p src/components src/utils src/pages
 
 # Create .env file if it doesn't exist
 if [ ! -f .env ]; then
-    echo "🔑 Creating .env file..."
+    echo "Creating .env file..."
     cat > .env << EOL
-REACT_APP_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
-REACT_APP_OPENWEATHER_API_KEY=your_openweather_api_key
-REACT_APP_WEATHERAPI_KEY=your_weatherapi_key
+REACT_APP_MAPBOX_ACCESS_TOKEN=your_mapbox_access_token_here
+REACT_APP_OPENWEATHER_API_KEY=your_openweather_api_key_here
 EOL
-    echo "⚠️ Please update the API keys in .env file"
+    echo "Please update the API keys in .env file with your actual keys"
 fi
 
 # Install dependencies
@@ -44,6 +43,7 @@ cat > public/index.html << EOL
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="Drone Weather Route Planner" />
     <title>Drone Weather Route Planner</title>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet">
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
@@ -71,4 +71,5 @@ echo "✅ Setup complete!"
 echo "🚀 To start the application:"
 echo "1. Update the API keys in .env file"
 echo "2. Run 'npm start'"
-echo "3. Open http://localhost:3000 in your browser" 
+echo "3. Open http://localhost:3000 in your browser"
+echo "Setup complete! Please update the API keys in .env file with your actual keys." 

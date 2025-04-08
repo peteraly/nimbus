@@ -171,31 +171,46 @@ export const requiresRerouting = (currentWeather, thresholds = DEFAULT_THRESHOLD
   return !isWeatherSafe(currentWeather, thresholds);
 };
 
-// Get alternative locations with better weather
-export const findAlternativeLocations = async (location, radius, apiKey) => {
+// Get nearby places using Mapbox Places API
+export const getNearbyPlaces = async (location, radius = 1000) => {
   try {
-    // Use Google Places API to find nearby locations
-    const response = await axios.get(
-      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=${radius}&type=point_of_interest&key=${apiKey}`
+    const mapboxToken = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+    const response = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${location.lng},${location.lat}.json?types=poi&radius=${radius}&access_token=${mapboxToken}`
     );
+    const data = await response.json();
+    
+    return data.features.map(feature => ({
+      name: feature.text,
+      location: {
+        lat: feature.center[1],
+        lng: feature.center[0]
+      },
+      placeId: feature.id
+    }));
+  } catch (error) {
+    console.error('Error fetching nearby places:', error);
+    return [];
+  }
+};
 
-    // Filter locations based on weather conditions
-    const alternatives = await Promise.all(
-      response.data.results.map(async (place) => {
-        const forecast = await getWeatherForecast(
-          { lat: place.geometry.location.lat, lng: place.geometry.location.lng },
-          apiKey
-        );
-        
-        return {
-          ...place,
-          weatherForecast: forecast,
-          isSafe: forecast.every(day => isWeatherSafe(day))
-        };
-      })
+// Get alternative locations with better weather
+export const findAlternativeLocations = async (location, radius = 1000) => {
+  try {
+    const mapboxToken = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+    const response = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${location.lng},${location.lat}.json?types=poi&radius=${radius}&access_token=${mapboxToken}`
     );
-
-    return alternatives.filter(alt => alt.isSafe);
+    const data = await response.json();
+    
+    return data.features.map(feature => ({
+      name: feature.text,
+      location: {
+        lat: feature.center[1],
+        lng: feature.center[0]
+      },
+      placeId: feature.id
+    }));
   } catch (error) {
     console.error('Error finding alternative locations:', error);
     return [];

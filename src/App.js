@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ChakraProvider,
   Box,
@@ -9,6 +9,10 @@ import {
   IconButton,
   useColorMode,
   useToast,
+  HStack,
+  Text,
+  Badge,
+  Divider,
 } from '@chakra-ui/react';
 import { SunIcon, MoonIcon } from '@chakra-ui/icons';
 import AddressInput from './components/AddressInput';
@@ -18,9 +22,11 @@ import WeatherForecast from './components/WeatherForecast';
 import Settings from './pages/Settings';
 import { getOptimizedRoute } from './utils/routeUtils';
 import RouteOptions from './components/RouteOptions';
+import { getWeatherData } from './services/weatherService';
 
 function App() {
   const [locations, setLocations] = useState([]);
+  const [startLocation, setStartLocation] = useState(null);
   const [route, setRoute] = useState(null);
   const [settings, setSettings] = useState({
     display: {
@@ -37,103 +43,49 @@ function App() {
   const textColor = useColorModeValue('gray.800', 'white');
   const { colorMode, toggleColorMode } = useColorMode();
 
-  // Transform locations with weather data
-  const locationsWithWeather = locations.map(location => ({
-    ...location,
-    forecast: location && location.address ? weatherData[location.address]?.forecast : undefined
-  }));
-
   // Keep weatherDataRef in sync with weatherData
   useEffect(() => {
     weatherDataRef.current = weatherData;
   }, [weatherData]);
 
-  // Fetch weather data when locations change
+  // Fetch weather data when locations or startLocation change
   useEffect(() => {
-    const fetchWeatherData = async (location) => {
+    const fetchWeatherData = async () => {
       try {
-        // Check if we already have weather data for this location
-        if (weatherDataRef.current[location.address]) {
-          return;
+        // Create a map of existing weather data
+        const newWeatherData = { ...weatherData };
+        let hasUpdates = false;
+
+        // Fetch weather data for start location if it doesn't have it yet
+        if (startLocation && startLocation.address && !newWeatherData[startLocation.address]) {
+          console.log(`Fetching weather data for start location: ${startLocation.address}`);
+          const data = await getWeatherData(startLocation);
+          if (data) {
+            console.log(`Received weather data for start location: ${startLocation.address}`, data);
+            newWeatherData[startLocation.address] = data;
+            hasUpdates = true;
+          }
         }
 
-        const response = await fetch(
-          `https://api.openweathermap.org/data/2.5/forecast?lat=${location.lat}&lon=${location.lng}&appid=${process.env.REACT_APP_OPENWEATHER_API_KEY}&units=imperial`
-        );
-        const data = await response.json();
-        
-        if (data.cod === '200') {
-          console.log('Weather data received:', data);
-          console.log('Number of 3-hour intervals:', data.list.length);
-          
-          // Process the forecast data to include all necessary information
-          // OpenWeather API returns data in 3-hour intervals, so we need to generate hourly data
-          const hourlyForecast = [];
-          
-          // Process each 3-hour interval
-          data.list.forEach((item, index) => {
-            const currentTime = new Date(item.dt * 1000);
-            const nextTime = index < data.list.length - 1 
-              ? new Date(data.list[index + 1].dt * 1000) 
-              : new Date(currentTime.getTime() + 3 * 3600000); // If last item, add 3 hours
-            
-            // Generate hourly data for this 3-hour interval
-            for (let hour = 0; hour < 3; hour++) {
-              const hourTime = new Date(currentTime.getTime() + hour * 3600000);
-              
-              // Skip if this hour is beyond the next interval
-              if (hourTime >= nextTime) continue;
-              
-              // Interpolate values for this hour
-              const progress = hour / 3; // 0 to 1
-              const nextItem = index < data.list.length - 1 ? data.list[index + 1] : item;
-              
-              // Interpolate temperature
-              const tempDiff = nextItem.main.temp - item.main.temp;
-              const interpolatedTemp = item.main.temp + tempDiff * progress;
-              
-              // Interpolate wind speed
-              const windDiff = nextItem.wind.speed - item.wind.speed;
-              const interpolatedWind = item.wind.speed + windDiff * progress;
-              
-              // For precipitation, divide the 3h value by 3 for hourly
-              const hourlyPrecip = (item.rain?.['3h'] || 0) / 3;
-              
-              // For visibility, use the current value
-              const visibility = item.visibility;
-              
-              // Add the hourly forecast
-              hourlyForecast.push({
-                date: hourTime.toISOString(),
-                temperature: interpolatedTemp,
-                wind: interpolatedWind,
-                precipitation: hourlyPrecip,
-                visibility: visibility,
-                humidity: item.main.humidity,
-                pressure: item.main.pressure,
-                clouds: item.clouds.all,
-                description: item.weather[0].description,
-                icon: item.weather[0].icon
-              });
-            }
-          });
-          
-          console.log('Generated hourly forecast with hours:', hourlyForecast.length);
-          
-          setWeatherData(prev => ({
-            ...prev,
-            [location.address]: {
-              ...location,
-              forecast: hourlyForecast
-            }
-          }));
-
-          // Check for weather alerts
-          if (data.alerts) {
-            setWeatherAlerts(prev => [...prev, ...data.alerts]);
+        // Fetch weather data for each location that doesn't have it yet
+        for (const location of locations) {
+          if (!location.address || newWeatherData[location.address]) {
+            continue;
           }
-        } else {
-          throw new Error(data.message);
+
+          console.log(`Fetching weather data for: ${location.address}`);
+          const data = await getWeatherData(location);
+          if (data) {
+            console.log(`Received weather data for: ${location.address}`, data);
+            newWeatherData[location.address] = data;
+            hasUpdates = true;
+          }
+        }
+
+        // Only update state if we have new weather data
+        if (hasUpdates) {
+          console.log('Updating weather data state with new data');
+          setWeatherData(newWeatherData);
         }
       } catch (error) {
         console.error('Error fetching weather data:', error);
@@ -147,47 +99,87 @@ function App() {
       }
     };
 
-    // Fetch weather data for new locations
-    locations.forEach(location => {
-      fetchWeatherData(location);
-    });
-  }, [locations, toast]); // weatherDataRef is stable, so we don't need it in deps
+    fetchWeatherData();
+  }, [locations, startLocation, toast, weatherData]);
 
   // Add this new effect to handle route optimization
-  useEffect(() => {
-    const optimizeRoute = async () => {
-      if (locations.length >= 2) {
-        try {
-          console.log('Optimizing route for locations:', locations);
-          const optimizedRoute = await getOptimizedRoute(locationsWithWeather);
-          console.log('Optimized route received:', optimizedRoute);
-          setRoute(optimizedRoute);
-        } catch (error) {
-          console.error('Error optimizing route:', error);
-          toast({
-            title: 'Error optimizing route',
-            description: error.message,
-            status: 'error',
-            duration: 5000,
-            isClosable: true,
-          });
-        }
-      } else {
-        setRoute(null);
+  const optimizeRoute = useCallback(async () => {
+    if (locations.length < 1) return;
+    
+    try {
+      // Check if we have weather data for all locations
+      const allLocations = startLocation ? [startLocation, ...locations] : locations;
+      const hasAllWeatherData = allLocations.every(loc => weatherData[loc.address]);
+      
+      if (!hasAllWeatherData) {
+        console.log('Waiting for weather data...');
+        return;
       }
-    };
+      
+      console.log('Optimizing route with locations:', allLocations);
+      const optimizedRoute = await getOptimizedRoute(locations, weatherData, startLocation);
+      setRoute(optimizedRoute);
+    } catch (error) {
+      console.error('Error optimizing route:', error);
+      toast({
+        title: 'Error optimizing route',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+  }, [locations, weatherData, startLocation, toast]);
 
+  useEffect(() => {
     optimizeRoute();
-  }, [locations, locationsWithWeather, toast]);
+  }, [optimizeRoute]);
+
+  // Memoize locationsWithWeather to prevent unnecessary recalculations
+  const locationsWithWeather = React.useMemo(() => {
+    const allLocations = startLocation 
+      ? [startLocation, ...locations]
+      : locations;
+    
+    return allLocations.map(location => ({
+      ...location,
+      weather: location && location.address ? weatherData[location.address]?.current : undefined,
+      forecast: location && location.address ? weatherData[location.address]?.forecast : undefined
+    }));
+  }, [locations, startLocation, weatherData]);
 
   const handleLocationAdd = (location) => {
+    // Check if location already exists
+    const isDuplicate = locations.some(
+      loc => loc.address === location.address
+    );
+    
+    // Check if location is the same as start location
+    const isStartLocation = startLocation && startLocation.address === location.address;
+    
+    if (isDuplicate || isStartLocation) {
+      toast({
+        title: 'Location already added',
+        description: 'This location is already in your route.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    
     setLocations(prev => [...prev, location]);
+  };
+
+  const handleStartLocationAdd = (location) => {
+    setStartLocation(location);
   };
 
   const handleLocationRemove = (index) => {
     if (index === null) {
       // Clear all locations
       setLocations([]);
+      setStartLocation(null);
       setWeatherData({});
       setWeatherAlerts([]);
       setRoute(null);
@@ -211,6 +203,10 @@ function App() {
         return newData;
       });
     }
+  };
+
+  const handleStartLocationRemove = () => {
+    setStartLocation(null);
   };
 
   const handleSettingsUpdate = (newSettings) => {
@@ -237,14 +233,37 @@ function App() {
               />
             </Box>
             
-            <AddressInput
-              onLocationAdd={handleLocationAdd}
-              onLocationRemove={handleLocationRemove}
-              locations={locations}
-            />
+            <Box>
+              <Text fontWeight="bold" mb={2}>Starting Point</Text>
+              <AddressInput
+                onLocationAdd={handleStartLocationAdd}
+                onLocationRemove={handleStartLocationRemove}
+                locations={startLocation ? [startLocation] : []}
+                placeholder="Enter starting point address..."
+              />
+              {startLocation && (
+                <HStack mt={2} spacing={2}>
+                  <Badge colorScheme="green">Start</Badge>
+                  <Text fontSize="sm">{startLocation.address}</Text>
+                </HStack>
+              )}
+            </Box>
+            
+            <Divider />
+            
+            <Box>
+              <Text fontWeight="bold" mb={2}>Destination Points</Text>
+              <AddressInput
+                onLocationAdd={handleLocationAdd}
+                onLocationRemove={handleLocationRemove}
+                locations={locations}
+                placeholder="Enter destination address..."
+              />
+            </Box>
 
             <MapDisplay
               locations={locations}
+              startLocation={startLocation}
               route={route}
               settings={settings}
               onRouteUpdate={handleRouteUpdate}
@@ -259,6 +278,7 @@ function App() {
             <RouteSummary
               route={route}
               locations={locations}
+              startLocation={startLocation}
             />
 
             <WeatherForecast

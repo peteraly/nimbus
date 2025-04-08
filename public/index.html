@@ -12,18 +12,10 @@
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <title>Drone Weather Route Planner</title>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css' rel='stylesheet' />
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-    <!-- Google Maps API -->
-    <script>
-      function initMap() {
-        window.dispatchEvent(new Event('google-maps-callback'));
-      }
-    </script>
-    <script defer
-      src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB4xjB_OeYCQ-EXs1RsLclVMnPMcl17V7g&libraries=places&callback=initMap">
-    </script>
   </body>
 </html> 

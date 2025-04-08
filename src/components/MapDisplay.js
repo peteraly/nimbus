@@ -1,225 +1,188 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Box } from '@chakra-ui/react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 
-const MapDisplay = ({ locations, route, settings }) => {
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const markersRef = useRef([]);
-  const directionsRendererRef = useRef(null);
-  const boundsTimeoutRef = useRef(null);
+const MapDisplay = ({ locations, route, startLocation }) => {
+  const mapContainer = useRef(null);
+  const map = useRef(null);
+  const markers = useRef([]);
+  const routeLayer = useRef(null);
 
-  // Initialize map only once
+  // Memoize locations to prevent unnecessary updates
+  const memoizedLocations = useMemo(() => locations, [locations]);
+
   useEffect(() => {
-    if (!mapRef.current || !window.google || !window.google.maps) {
-      console.log('Map container or Google Maps API not ready');
-      return;
-    }
+    if (!mapContainer.current) return;
 
-    try {
-      console.log('Initializing map...');
-      const map = new window.google.maps.Map(mapRef.current, {
-        center: { lat: 39.8283, lng: -98.5795 }, // Center of USA
-        zoom: 4,
-        mapTypeId: window.google.maps.MapTypeId.ROADMAP
+    // Initialize map if not already initialized
+    if (!map.current) {
+      mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+      
+      map.current = new mapboxgl.Map({
+        container: mapContainer.current,
+        style: process.env.REACT_APP_MAPBOX_STYLE_URL,
+        center: [-104.8214, 38.8339], // Colorado Springs center
+        zoom: 12
       });
 
-      mapInstanceRef.current = map;
+      // Add navigation controls
+      map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+    }
 
-      // Create directions renderer
-      const directionsRenderer = new window.google.maps.DirectionsRenderer({
-        map,
-        suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#3182CE',
-          strokeWeight: 5
+    // Update markers and route when locations or route change
+    const updateMap = () => {
+      // Clear existing markers
+      markers.current.forEach(marker => marker.remove());
+      markers.current = [];
+
+      // Clear existing route layer
+      if (routeLayer.current) {
+        if (map.current.getLayer('route')) {
+          map.current.removeLayer('route');
         }
-      });
-      directionsRendererRef.current = directionsRenderer;
-
-      console.log('Map initialized successfully');
-    } catch (error) {
-      console.error('Error initializing map:', error);
-    }
-
-    return () => {
-      if (mapInstanceRef.current) {
-        window.google.maps.event.clearInstanceListeners(mapInstanceRef.current);
+        if (map.current.getSource('route')) {
+          map.current.removeSource('route');
+        }
       }
-      if (boundsTimeoutRef.current) {
-        clearTimeout(boundsTimeoutRef.current);
+
+      // Add markers for each location
+      const bounds = new mapboxgl.LngLatBounds();
+      
+      memoizedLocations.forEach((location, index) => {
+        const isStart = startLocation && startLocation.address === location.address;
+        const coordinates = [parseFloat(location.lng), parseFloat(location.lat)];
+        
+        // Create marker element
+        const el = document.createElement('div');
+        el.className = 'marker';
+        el.style.width = '24px';
+        el.style.height = '24px';
+        el.style.borderRadius = '50%';
+        el.style.backgroundColor = isStart ? '#48BB78' : '#3182CE';
+        el.style.border = '2px solid white';
+        el.style.display = 'flex';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        el.style.color = 'white';
+        el.style.fontWeight = 'bold';
+        el.style.fontSize = '12px';
+        el.textContent = isStart ? 'S' : (index + 1).toString();
+
+        // Create popup
+        const popup = new mapboxgl.Popup({ offset: 25 })
+          .setHTML(`
+            <div style="padding: 8px;">
+              <strong>${isStart ? 'Start: ' : ''}${location.address}</strong>
+              ${location.forecast ? `
+                <br>Temperature: ${location.forecast[0].temperature}°F
+                <br>Wind: ${location.forecast[0].wind} mph
+                <br>Visibility: ${location.forecast[0].visibility / 1000} km
+              ` : ''}
+            </div>
+          `);
+
+        // Add marker to map
+        const marker = new mapboxgl.Marker(el)
+          .setLngLat(coordinates)
+          .setPopup(popup)
+          .addTo(map.current);
+
+        markers.current.push(marker);
+        bounds.extend(coordinates);
+      });
+
+      // Add route if available
+      if (route && route.directions) {
+        const coordinates = route.directions.routes[0].overview_path.map(point => [point.lng(), point.lat()]);
+        
+        map.current.addSource('route', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: coordinates
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: 'route',
+          type: 'line',
+          source: 'route',
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round'
+          },
+          paint: {
+            'line-color': '#3182CE',
+            'line-width': 4
+          }
+        });
+
+        routeLayer.current = true;
+      }
+
+      // Fit map to show all markers
+      if (memoizedLocations.length > 0) {
+        map.current.fitBounds(bounds, {
+          padding: 50,
+          maxZoom: 15
+        });
       }
     };
-  }, []); // Empty dependency array means this effect runs only once
 
-  // Update map style when dark mode changes
-  useEffect(() => {
-    if (!mapInstanceRef.current) return;
-
-    const styles = settings.darkMode ? [
-      { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-      { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-      { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-      {
-        featureType: "administrative.locality",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#d59563" }]
-      },
-      {
-        featureType: "poi",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#d59563" }]
-      },
-      {
-        featureType: "poi.park",
-        elementType: "geometry",
-        stylers: [{ color: "#263c3f" }]
-      },
-      {
-        featureType: "poi.park",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#6b9a76" }]
-      },
-      {
-        featureType: "road",
-        elementType: "geometry",
-        stylers: [{ color: "#38414e" }]
-      },
-      {
-        featureType: "road",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#212a37" }]
-      },
-      {
-        featureType: "road",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#9ca5b3" }]
-      },
-      {
-        featureType: "road.highway",
-        elementType: "geometry",
-        stylers: [{ color: "#746855" }]
-      },
-      {
-        featureType: "road.highway",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#1f2835" }]
-      },
-      {
-        featureType: "road.highway",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#f3d19c" }]
-      },
-      {
-        featureType: "water",
-        elementType: "geometry",
-        stylers: [{ color: "#17263c" }]
-      },
-      {
-        featureType: "water",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#515c6d" }]
-      },
-      {
-        featureType: "water",
-        elementType: "labels.text.stroke",
-        stylers: [{ color: "#17263c" }]
-      }
-    ] : [];
-
-    mapInstanceRef.current.setOptions({ styles });
-  }, [settings.darkMode]);
-
-  // Update markers and route when locations or route change
-  useEffect(() => {
-    if (!mapInstanceRef.current || !window.google || !window.google.maps) {
-      console.log('Map or Google Maps API not ready');
-      return;
+    // Update map when component mounts or when dependencies change
+    if (map.current.loaded()) {
+      updateMap();
+    } else {
+      map.current.on('load', updateMap);
     }
 
-    try {
-      // Update or create markers for each location
-      locations.forEach((location, index) => {
-        const position = { 
-          lat: parseFloat(location.lat), 
-          lng: parseFloat(location.lng) 
-        };
-
-        // Check if we already have a marker for this location
-        let marker = markersRef.current[index];
-        
-        if (marker) {
-          // Update existing marker position without animation
-          marker.setPosition(position);
-          marker.setTitle(`${index + 1}. ${location.address}`);
-          marker.setLabel((index + 1).toString());
-        } else {
-          // Create new marker only if one doesn't exist
-          console.log('Creating new marker for location:', location);
-          marker = new window.google.maps.Marker({
-            position,
-            map: mapInstanceRef.current,
-            title: `${index + 1}. ${location.address}`,
-            label: (index + 1).toString(),
-            animation: window.google.maps.Animation.DROP
-          });
-          markersRef.current[index] = marker;
-        }
-      });
-
-      // Remove excess markers if we have fewer locations than before
-      if (markersRef.current.length > locations.length) {
-        for (let i = locations.length; i < markersRef.current.length; i++) {
-          if (markersRef.current[i]) {
-            markersRef.current[i].setMap(null);
-            markersRef.current[i] = null;
+    // Cleanup on unmount
+    return () => {
+      // Safely remove markers
+      if (markers.current && markers.current.length > 0) {
+        markers.current.forEach(marker => {
+          try {
+            if (marker && typeof marker.remove === 'function') {
+              marker.remove();
+            }
+          } catch (error) {
+            console.error('Error removing marker:', error);
           }
+        });
+        markers.current = [];
+      }
+      
+      // Safely remove the map
+      if (map.current) {
+        try {
+          // Remove any event listeners first
+          map.current.off();
+          
+          // Remove the map instance
+          map.current.remove();
+          map.current = null;
+        } catch (error) {
+          console.error('Error removing map:', error);
         }
-        markersRef.current = markersRef.current.slice(0, locations.length);
       }
-
-      // Update route if available
-      if (route && route.directions) {
-        console.log('Route updated:', route);
-        directionsRendererRef.current.setDirections(route.directions);
-      } else {
-        directionsRendererRef.current.setDirections({ routes: [] });
-      }
-
-      // Debounce the bounds adjustment to prevent constant updates
-      if (boundsTimeoutRef.current) {
-        clearTimeout(boundsTimeoutRef.current);
-      }
-
-      boundsTimeoutRef.current = setTimeout(() => {
-        // Adjust map bounds to show all markers
-        if (locations.length > 0) {
-          console.log('Adjusting map bounds for locations:', locations);
-          const bounds = new window.google.maps.LatLngBounds();
-          locations.forEach(location => {
-            console.log('Extending bounds for location:', location);
-            bounds.extend(new window.google.maps.LatLng(
-              parseFloat(location.lat),
-              parseFloat(location.lng)
-            ));
-          });
-          mapInstanceRef.current.fitBounds(bounds);
-        }
-      }, 500); // 500ms debounce
-    } catch (error) {
-      console.error('Error updating map:', error);
-    }
-  }, [locations, route]);
+    };
+  }, [memoizedLocations, route, startLocation]);
 
   return (
     <Box
-      ref={mapRef}
-      height="500px"
-      width="100%"
-      borderRadius="md"
+      ref={mapContainer}
+      h="500px"
+      w="100%"
+      borderRadius="lg"
       overflow="hidden"
-      boxShadow="md"
+      boxShadow="base"
     />
   );
 };
 
-export default MapDisplay; 
+export default React.memo(MapDisplay); 

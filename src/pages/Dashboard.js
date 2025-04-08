@@ -9,6 +9,9 @@ import {
   Link as ChakraLink,
   VStack,
   HStack,
+  Text,
+  Badge,
+  SimpleGrid,
 } from '@chakra-ui/react';
 import { Link as RouterLink } from 'react-router-dom';
 import MapDisplay from '../components/MapDisplay';
@@ -19,113 +22,36 @@ import { loadSettings } from '../utils/settingsUtils';
 import { getOptimizedRoute, calculateRouteStats, generateRouteOptions } from '../utils/routeUtils';
 import { getWeatherForecast } from '../utils/weatherUtils';
 import RouteOptions from '../components/RouteOptions';
-
-// Load Google Maps API
-const loadGoogleMapsAPI = () => {
-  return new Promise((resolve, reject) => {
-    console.log('Starting loadGoogleMapsAPI...');
-    
-    if (window.google && window.google.maps) {
-      console.log('Google Maps API already loaded');
-      resolve(window.google.maps);
-      return;
-    }
-
-    // Use the recommended loading pattern
-    (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
-      key: process.env.REACT_APP_GOOGLE_MAPS_API_KEY,
-      v: "weekly",
-      libraries: ["places", "directions"]
-    });
-
-    // Wait for the API to load
-    const checkGoogleMaps = setInterval(() => {
-      if (window.google && window.google.maps) {
-        console.log('Google Maps API loaded successfully');
-        clearInterval(checkGoogleMaps);
-        resolve(window.google.maps);
-      }
-    }, 100);
-
-    // Timeout after 10 seconds
-    setTimeout(() => {
-      if (!window.google || !window.google.maps) {
-        clearInterval(checkGoogleMaps);
-        reject(new Error('Google Maps API failed to load after timeout'));
-      }
-    }, 10000);
-  });
-};
+import RouteExplanation from '../components/RouteExplanation';
 
 function Dashboard() {
   const [locations, setLocations] = useState([]);
+  const [startLocation, setStartLocation] = useState(null);
   const [route, setRoute] = useState(null);
+  const [routeOptions, setRouteOptions] = useState([]);
   const [routeStats, setRouteStats] = useState(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [settings, setSettings] = useState(loadSettings());
-  const [mapsLoaded, setMapsLoaded] = useState(false);
-  const [mapsError, setMapsError] = useState(null);
   const toast = useToast();
-  const [routeOptions, setRouteOptions] = useState([]);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
-
-  // Load Google Maps API on component mount
-  useEffect(() => {
-    let mounted = true;
-
-    const loadMaps = async () => {
-      try {
-        await loadGoogleMapsAPI();
-        if (mounted) {
-          setMapsLoaded(true);
-          setMapsError(null);
-        }
-      } catch (error) {
-        if (mounted) {
-          setMapsError(error.message);
-          toast({
-            title: 'Error',
-            description: 'Failed to load Google Maps API. Please refresh the page.',
-            status: 'error',
-            duration: 5000,
-            isClosable: true,
-          });
-        }
-      }
-    };
-
-    loadMaps();
-
-    return () => {
-      mounted = false;
-    };
-  }, [toast]);
 
   // Calculate route when locations change
   useEffect(() => {
     const calculateRouteIfNeeded = async () => {
-      if (!mapsLoaded) {
-        return;
-      }
-
-      if (mapsError) {
-        return;
-      }
-
-      if (isCalculating) {
-        return;
-      }
-
-      if (locations.length < 2) {
-        setRouteOptions([]);
-        setRoute(null);
-        setRouteStats(null);
+      if (isCalculating || locations.length < 2) {
+        if (locations.length < 2) {
+          setRouteOptions([]);
+          setRoute(null);
+          setRouteStats(null);
+        }
         return;
       }
 
       try {
         setIsCalculating(true);
-        const optimizedRoute = await getOptimizedRoute(locations);
+        // Use the first added location as start if none specified
+        const start = startLocation || locations[0];
+        const optimizedRoute = await getOptimizedRoute(locations, start);
         
         if (optimizedRoute) {
           setRouteOptions([optimizedRoute]);
@@ -154,115 +80,30 @@ function Dashboard() {
     };
 
     calculateRouteIfNeeded();
-  }, [locations, mapsLoaded, mapsError, isCalculating, toast]);
+  }, [locations, isCalculating, startLocation, toast]);
 
-  const handleLocationAdd = async (location) => {
-    try {
-      const weatherApiKey = process.env.REACT_APP_OPENWEATHER_API_KEY;
-      
-      if (!weatherApiKey) {
-        // Create mock hourly forecast data for 7 days
-        const mockForecast = Array(7).fill().map((_, dayIndex) => {
-          const dayForecast = Array(24).fill().map((_, hourIndex) => ({
-            date: new Date(Date.now() + dayIndex * 86400000 + hourIndex * 3600000).toISOString(),
-            temperature: 70 + Math.random() * 20 - 10,
-            wind: Math.random() * 25,
-            precipitation: Math.random() < 0.3 ? Math.random() * 2 : 0,
-            visibility: 10000 - Math.random() * 5000,
-            humidity: Math.random() * 100,
-            pressure: 1000 + Math.random() * 20,
-            clouds: Math.random() * 100
-          }));
-          return dayForecast;
-        }).flat();
-        
-        const newLocation = {
-          ...location,
-          forecast: mockForecast,
-          lat: parseFloat(location.lat),
-          lng: parseFloat(location.lng)
-        };
-        
-        setLocations(prevLocations => [...prevLocations, newLocation]);
-        return;
-      }
+  const handleLocationAdd = (location) => {
+    // If this is the first location, set it as the start location
+    if (locations.length === 0) {
+      setStartLocation(location);
+    }
+    setLocations(prev => [...prev, location]);
+  };
 
-      // Get real forecast data with hourly intervals
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/forecast?lat=${location.lat}&lon=${location.lng}&appid=${weatherApiKey}&units=imperial`
-      );
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch weather data');
-      }
-      
-      const data = await response.json();
-      
-      // Process the forecast data to include all necessary information
-      const hourlyForecast = [];
-      
-      data.list.forEach((item, index) => {
-        const currentTime = new Date(item.dt * 1000);
-        
-        // Interpolate data for each hour
-        for (let hour = 0; hour < 3; hour++) {
-          const hourTime = new Date(currentTime.getTime() + hour * 3600000);
-          
-          // Interpolate temperature
-          const nextItem = data.list[index + 1];
-          const interpolatedTemp = nextItem ? 
-            item.main.temp + (nextItem.main.temp - item.main.temp) * (hour / 3) :
-            item.main.temp;
-          
-          // Interpolate wind speed
-          const interpolatedWind = nextItem ?
-            item.wind.speed + (nextItem.wind.speed - item.wind.speed) * (hour / 3) :
-            item.wind.speed;
-          
-          // Calculate hourly precipitation
-          const hourlyPrecip = item.rain ? (item.rain['3h'] || 0) / 3 : 0;
-          
-          // Get visibility (in meters)
-          const visibility = item.visibility || 10000;
-          
-          // Add the hourly forecast
-          hourlyForecast.push({
-            date: hourTime.toISOString(),
-            temperature: interpolatedTemp,
-            wind: interpolatedWind,
-            precipitation: hourlyPrecip,
-            visibility: visibility,
-            humidity: item.main.humidity,
-            pressure: item.main.pressure,
-            clouds: item.clouds.all,
-            description: item.weather[0].description,
-            icon: item.weather[0].icon
-          });
-        }
-      });
-      
-      const newLocation = {
-        ...location,
-        forecast: hourlyForecast,
-        lat: parseFloat(location.lat),
-        lng: parseFloat(location.lng)
-      };
-      
-      setLocations(prevLocations => [...prevLocations, newLocation]);
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to add location. Please try again.',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
+  const handleLocationRemove = (locationToRemove) => {
+    if (locationToRemove === null) {
+      setLocations([]);
+      setStartLocation(null);
+      return;
+    }
+    setLocations(prev => prev.filter(loc => loc.address !== locationToRemove.address));
+    if (startLocation && startLocation.address === locationToRemove.address) {
+      setStartLocation(null);
     }
   };
 
-  const handleLocationRemove = (index) => {
-    const newLocations = locations.filter((_, i) => i !== index);
-    setLocations(newLocations);
+  const handleSetStartLocation = (location) => {
+    setStartLocation(location);
   };
 
   const handleRouteSelect = (index) => {
@@ -294,44 +135,34 @@ function Dashboard() {
 
       <Box p={4}>
         <VStack spacing={4} align="stretch">
-          <AddressInput
-            onLocationAdd={handleLocationAdd}
-            onLocationRemove={handleLocationRemove}
-            locations={locations}
-          />
-          
-          {locations.length > 0 && (
-            <WeatherForecast locations={locations} />
-          )}
-          
-          {routeOptions.length > 0 && (
-            <Box mt={6} p={4} bg="white" borderRadius="lg" boxShadow="md">
-              <Heading size="md" mb={4}>Recommended Routes</Heading>
-              <RouteOptions
-                routeOptions={routeOptions}
-                onSelectRoute={handleRouteSelect}
-                selectedRouteIndex={selectedRouteIndex}
-              />
-            </Box>
-          )}
-          
-          <HStack spacing={4} align="stretch">
+          <HStack spacing={4}>
             <Box flex={1}>
-              <MapDisplay
+              <AddressInput
+                onLocationAdd={handleLocationAdd}
+                onLocationRemove={handleLocationRemove}
                 locations={locations}
-                route={route}
-                settings={settings}
-              />
-            </Box>
-            <Box w="400px">
-              <RouteSummary
-                route={route}
-                stats={routeStats}
-                locations={locations}
-                isCalculating={isCalculating}
               />
             </Box>
           </HStack>
+
+          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+            <Box>
+              <LocationList
+                locations={locations}
+                onLocationRemove={handleLocationRemove}
+                onSetStartLocation={handleSetStartLocation}
+                startLocation={startLocation}
+              />
+              {route && <RouteExplanation route={route} />}
+            </Box>
+            <Box>
+              <MapDisplay
+                locations={locations}
+                route={route}
+                startLocation={startLocation}
+              />
+            </Box>
+          </SimpleGrid>
         </VStack>
       </Box>
     </Container>

@@ -16,11 +16,24 @@ mkdir -p src/components src/utils src/pages
 
 # Create .env file if it doesn't exist
 if [ ! -f .env ]; then
-    echo "🔑 Creating .env file..."
+    echo "Creating .env file..."
     cat > .env << EOL
-REACT_APP_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+# Mapbox API Keys
+REACT_APP_MAPBOX_ACCESS_TOKEN=your_mapbox_access_token
+REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/mapbox/streets-v12
+
+# OpenWeather API Key
 REACT_APP_OPENWEATHER_API_KEY=your_openweather_api_key
+
+# WeatherAPI Key (PLACEHOLDER - NOT REAL KEY)
 REACT_APP_WEATHERAPI_KEY=your_weatherapi_key
+
+# Note: These are placeholder API keys and should be replaced with real ones in production
+# Required Mapbox Services:
+# - Maps
+# - Directions API
+# - Geocoding API
+# - Places API
 EOL
     echo "⚠️ Please update the API keys in .env file"
 fi
@@ -44,6 +57,7 @@ cat > public/index.html << EOL
     <meta name="theme-color" content="#000000" />
     <meta name="description" content="Drone Weather Route Planner" />
     <title>Drone Weather Route Planner</title>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet">
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
