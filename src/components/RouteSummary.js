@@ -18,6 +18,7 @@ import {
   Button,
   useToast,
   SimpleGrid,
+  Flex,
 } from '@chakra-ui/react';
 import {
   FaMapMarkerAlt,
@@ -34,8 +35,10 @@ import {
   FaCalendarAlt,
   FaExclamationTriangle,
   FaCheckCircle,
+  FaRoute,
 } from 'react-icons/fa';
 import { format, parseISO } from 'date-fns';
+import RouteMap from './RouteMap';
 
 const RouteSummary = ({ route, locations, startLocation }) => {
   const toast = useToast();
@@ -372,8 +375,9 @@ const RouteSummary = ({ route, locations, startLocation }) => {
     // For other waypoints, calculate arrival time based on previous waypoint's arrival and travel duration
     let currentDate = new Date(appliedValues.startDate + 'T' + appliedValues.startTime);
     
+    // Add the duration of travel to the previous waypoint
     for (let i = 0; i < waypointIndex; i++) {
-      const waypoint = route.waypoints[i];
+      const waypoint = uniqueWaypoints[i];
       const duration = waypoint.duration || 0;
       
       // Add travel duration to current date
@@ -556,73 +560,14 @@ const RouteSummary = ({ route, locations, startLocation }) => {
   }, [route, appliedValues, arrivalDates, verifyRouteAccuracy]);
 
   // Add a function to get weather data for a specific waypoint at a specific time
-  const getWeatherForWaypoint = (waypoint, arrivalDate) => {
-    if (!waypoint?.location?.weather || !arrivalDate) {
-      debugLog('Missing weather data or arrival date', { 
-        hasWeather: !!waypoint?.location?.weather,
-        hasArrivalDate: !!arrivalDate,
-        address: waypoint?.location?.address
-      });
-      return null;
-    }
-
-    // Get the weather data for this location
-    const weatherData = waypoint.location.weather;
-    debugLog('Weather data for location', {
-      address: waypoint.location.address,
-      weatherData: weatherData
-    });
-
-    // Find the forecast entry closest to the arrival time
-    if (!weatherData.forecast?.list?.length) {
-      debugLog('No forecast data available', {
-        address: waypoint.location.address,
-        weatherData: weatherData
-      });
-      return null;
-    }
-
-    const arrivalTime = arrivalDate.getTime();
-    const closestForecast = weatherData.forecast.list.reduce((closest, current) => {
-      if (!current.dt_txt) return closest;
-      
-      const currentTime = new Date(current.dt_txt).getTime();
-      const closestTime = closest ? new Date(closest.dt_txt).getTime() : null;
-
-      if (!closest) return current;
-
-      const currentDiff = Math.abs(currentTime - arrivalTime);
-      const closestDiff = Math.abs(closestTime - arrivalTime);
-
-      return currentDiff < closestDiff ? current : closest;
-    }, null);
-
-    debugLog('Found closest forecast', {
-      address: waypoint.location.address,
-      arrivalTime: arrivalDate.toISOString(),
-      forecastTime: closestForecast?.dt_txt,
-      temperature: closestForecast?.main?.temp,
-      windSpeed: closestForecast?.wind?.speed,
-      precipitation: closestForecast?.rain?.['3h'],
-      visibility: closestForecast?.visibility
-    });
-
-    return closestForecast;
-  };
-
-  // Add a useEffect to run verification when route or applied values change
-  useEffect(() => {
-    if (route && appliedValues && arrivalDates.length > 0) {
-      verifyRouteAccuracy();
-    }
-  }, [route, appliedValues, arrivalDates, verifyRouteAccuracy]);
-
-  // Add a function to get weather data for a specific waypoint at a specific time
   if (!route) return null;
 
   return (
     <Box maxW="100%" overflow="hidden">
       <VStack spacing={4} align="stretch">
+        <Box mb={4}>
+          <RouteMap route={route} startLocation={startLocation} locations={locations} />
+        </Box>
         <HStack justify="space-between">
           <Text fontSize="xl" fontWeight="bold">
             Weather-Optimized Route
@@ -749,96 +694,97 @@ const RouteSummary = ({ route, locations, startLocation }) => {
         <Box maxW="100%" overflow="hidden">
           <VStack spacing={3} align="stretch" maxW="100%">
             {uniqueWaypoints.map((waypoint, index) => {
-              const arrivalDate = getArrivalDate(index);
-              const nextWaypoint = index < uniqueWaypoints.length - 1 ? uniqueWaypoints[index + 1] : null;
-              const distanceToNext = nextWaypoint ? nextWaypoint.distance || 0 : 0;
-              const durationToNext = nextWaypoint ? nextWaypoint.duration || 0 : 0;
+              const arrivalDate = waypoint.arrivalDate ? new Date(waypoint.arrivalDate) : null;
+              const nextWaypoint = uniqueWaypoints[index + 1];
               
+              // Get the distance and duration from the verification results
+              const waypointInfo = verificationResults.routeAccuracy?.waypoints[index];
+              const distanceToNext = waypointInfo?.distance || 0;
+              const durationToNext = waypointInfo?.duration || 0;
+
               // Get weather data for this waypoint at arrival time
               const weatherData = waypoint.location.weather;
-              const arrivalWeather = weatherData?.forecast?.list?.reduce((closest, forecast) => {
+              const arrivalWeather = weatherData?.forecast?.reduce((closest, forecast) => {
                 if (!closest || !arrivalDate) return forecast;
-                const forecastTime = new Date(forecast.dt_txt);
+                const forecastTime = new Date(forecast.date);
+                if (isNaN(forecastTime.getTime())) return closest;
                 const currentDiff = Math.abs(forecastTime.getTime() - arrivalDate.getTime());
-                const closestDiff = Math.abs(new Date(closest.dt_txt).getTime() - arrivalDate.getTime());
+                const closestDiff = Math.abs(new Date(closest.date).getTime() - arrivalDate.getTime());
                 return currentDiff < closestDiff ? forecast : closest;
               }, null);
 
-              debugLog('Weather data for waypoint', {
+              debugLog('Waypoint info', {
                 address: waypoint.location.address,
-                arrivalDate: arrivalDate?.toISOString(),
-                hasWeatherData: !!weatherData,
-                hasArrivalWeather: !!arrivalWeather,
-                forecastCount: weatherData?.forecast?.list?.length,
-                weatherData: weatherData
+                distance: distanceToNext,
+                duration: durationToNext,
+                verificationInfo: waypointInfo
               });
 
               return (
-                <Box key={index} p={4} borderWidth="1px" borderRadius="lg" borderColor="gray.200">
-                  <VStack align="start" spacing={3}>
-                    <HStack>
-                      <Icon as={FaMapMarkerAlt} color="red.500" />
-                      <Text fontWeight="medium">{waypoint.location.address}</Text>
-                    </HStack>
-                    
-                    {arrivalDate && (
-                      <Text fontSize="sm" color="gray.600">
-                        {index === 0 ? 'Start' : 'Arrival'}: {format(arrivalDate, 'EEE, MMM d, h:mm a')}
+                <Box key={waypoint.location.address} mb={4}>
+                  <Flex justify="space-between" align="center" mb={2}>
+                    <Text fontWeight="bold">{waypoint.location.address}</Text>
+                    <Text color="gray.600">
+                      {waypointInfo?.arrivalTime || 'Time not available'}
+                    </Text>
+                  </Flex>
+
+                  {arrivalWeather && (
+                    <Box bg="gray.50" p={3} borderRadius="md" mb={2}>
+                      <Flex align="center" mb={2}>
+                        <Box mr={2}>
+                          <img
+                            src={`http://openweathermap.org/img/wn/${arrivalWeather.icon}@2x.png`}
+                            alt={arrivalWeather.description}
+                            width="50"
+                            height="50"
+                          />
+                        </Box>
+                        <Box>
+                          <Text fontWeight="medium">{arrivalWeather.description}</Text>
+                          <Text fontSize="sm" color="gray.600">
+                            {arrivalWeather.temperature}°C
+                          </Text>
+                        </Box>
+                      </Flex>
+                      <SimpleGrid columns={2} spacing={2}>
+                        <Flex align="center">
+                          <FaWind className="mr-2" />
+                          <Text fontSize="sm">Wind: {arrivalWeather.wind} m/s</Text>
+                        </Flex>
+                        <Flex align="center">
+                          <FaCloudRain className="mr-2" />
+                          <Text fontSize="sm">Precip: {arrivalWeather.precipitation}%</Text>
+                        </Flex>
+                        <Flex align="center">
+                          <FaEye className="mr-2" />
+                          <Text fontSize="sm">Visibility: {arrivalWeather.visibility}m</Text>
+                        </Flex>
+                      </SimpleGrid>
+                    </Box>
+                  )}
+
+                  {nextWaypoint && (
+                    <Box bg="blue.50" p={3} borderRadius="md">
+                      <Text fontSize="sm" color="blue.700" mb={2}>
+                        Travel to next site:
                       </Text>
-                    )}
-                    
-                    {weatherData && (
-                      <Box width="100%" p={3} bg="gray.50" borderRadius="md">
-                        <VStack align="start" spacing={2}>
-                          <Text fontSize="sm" fontWeight="medium">Weather at {index === 0 ? 'start' : 'arrival'}:</Text>
-                          <SimpleGrid columns={2} spacing={4} width="100%">
-                            <HStack>
-                              <Icon as={FaThermometerHalf} color="orange.500" />
-                              <Text fontSize="sm">{Math.round(weatherData.current?.temperature || arrivalWeather?.main?.temp)}°F</Text>
-                            </HStack>
-                            <HStack>
-                              <Icon as={FaWind} color="blue.500" />
-                              <Text fontSize="sm">{Math.round(weatherData.current?.wind_speed || arrivalWeather?.wind?.speed)} mph</Text>
-                            </HStack>
-                            <HStack>
-                              <Icon as={FaCloud} color="gray.500" />
-                              <Text fontSize="sm">{weatherData.current?.precipitation || arrivalWeather?.rain?.['3h'] || 0} mm/h</Text>
-                            </HStack>
-                            <HStack>
-                              <Icon as={FaEye} color="purple.500" />
-                              <Text fontSize="sm">{((weatherData.current?.visibility || arrivalWeather?.visibility || 10000) / 1000).toFixed(1)} km</Text>
-                            </HStack>
-                          </SimpleGrid>
-                          {weatherData.current?.description && (
-                            <HStack spacing={2} width="100%">
-                              {getWeatherIcon(weatherData)}
-                              <Text fontSize="sm" textTransform="capitalize">
-                                {weatherData.current.description}
-                              </Text>
-                            </HStack>
-                          )}
-                        </VStack>
-                      </Box>
-                    )}
-                    
-                    {index < uniqueWaypoints.length - 1 && (
-                      <Box width="100%" p={2} bg="green.50" borderRadius="md">
-                        <VStack align="start" spacing={1}>
-                          <Text fontSize="sm" fontWeight="medium">Travel to next waypoint:</Text>
-                          <HStack spacing={4}>
-                            <HStack spacing={1}>
-                              <Icon as={FaMapMarkerAlt} color="green.500" boxSize="12px" />
-                              <Text fontSize="sm">{distanceToNext.toFixed(1)} km</Text>
-                            </HStack>
-                            <HStack spacing={1}>
-                              <Icon as={FaClock} color="green.500" boxSize="12px" />
-                              <Text fontSize="sm">{formatDuration(durationToNext)}</Text>
-                            </HStack>
-                          </HStack>
-                        </VStack>
-                      </Box>
-                    )}
-                  </VStack>
+                      <SimpleGrid columns={2} spacing={2}>
+                        <Flex align="center">
+                          <FaRoute className="mr-2" />
+                          <Text fontSize="sm">
+                            {(distanceToNext).toFixed(1)} km
+                          </Text>
+                        </Flex>
+                        <Flex align="center">
+                          <FaClock className="mr-2" />
+                          <Text fontSize="sm">
+                            {Math.floor(durationToNext / 3600)}h {Math.floor((durationToNext % 3600) / 60)}m
+                          </Text>
+                        </Flex>
+                      </SimpleGrid>
+                    </Box>
+                  )}
                 </Box>
               );
             })}
