@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { Box } from '@chakra-ui/react';
+import { Box, Spinner, Text, Center, Alert, AlertIcon, AlertTitle, AlertDescription } from '@chakra-ui/react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import PropTypes from 'prop-types';
 
 const MapDisplay = ({ locations, route, startLocation }) => {
   const mapContainer = useRef(null);
@@ -17,11 +18,12 @@ const MapDisplay = ({ locations, route, startLocation }) => {
 
     // Initialize map if not already initialized
     if (!map.current) {
-      mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+      // Use hardcoded token instead of environment variable
+      mapboxgl.accessToken = 'pk.eyJ1IjoicGV0ZXJhbHkiLCJhIjoiY205N2gzMzU1MDdieDJrcHh3ZnpuNXVteCJ9.8N9ZoaU05cVRUGEGAwA5uw';
       
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: process.env.REACT_APP_MAPBOX_STYLE_URL,
+        style: 'mapbox://styles/mapbox/streets-v11',
         center: [-104.8214, 38.8339], // Colorado Springs center
         zoom: 12
       });
@@ -134,55 +136,100 @@ const MapDisplay = ({ locations, route, startLocation }) => {
       }
     };
 
-    // Update map when component mounts or when dependencies change
-    if (map.current.loaded()) {
-      updateMap();
-    } else {
-      map.current.on('load', updateMap);
-    }
-
-    // Cleanup on unmount
-    return () => {
-      // Safely remove markers
-      if (markers.current && markers.current.length > 0) {
-        markers.current.forEach(marker => {
-          try {
-            if (marker && typeof marker.remove === 'function') {
-              marker.remove();
-            }
-          } catch (error) {
-            console.error('Error removing marker:', error);
-          }
-        });
-        markers.current = [];
-      }
-      
-      // Safely remove the map
-      if (map.current) {
-        try {
-          // Remove any event listeners first
-          map.current.off();
-          
-          // Remove the map instance
-          map.current.remove();
-          map.current = null;
-        } catch (error) {
-          console.error('Error removing map:', error);
-        }
-      }
-    };
+    // Call updateMap when locations or route change
+    updateMap();
   }, [memoizedLocations, route, startLocation]);
 
+  // Handle loading state
+  if (route && route.isLoading) {
+    return (
+      <Box 
+        height="500px" 
+        width="100%" 
+        position="relative" 
+        borderRadius="lg" 
+        overflow="hidden"
+        bg="gray.100"
+      >
+        <Center height="100%">
+          <Spinner size="xl" color="blue.500" thickness="4px" />
+          <Text ml={4} fontSize="lg">Optimizing route...</Text>
+        </Center>
+      </Box>
+    );
+  }
+
+  // Handle error state
+  if (route && route.error) {
+    return (
+      <Box 
+        height="500px" 
+        width="100%" 
+        position="relative" 
+        borderRadius="lg" 
+        overflow="hidden"
+        bg="gray.100"
+      >
+        <Center height="100%">
+          <Alert status="error" variant="subtle" flexDirection="column" alignItems="center" justifyContent="center" textAlign="center" height="200px" borderRadius="md">
+            <AlertIcon boxSize="40px" mr={0} />
+            <AlertTitle mt={4} mb={1} fontSize="lg">
+              {route.error.includes('Not enough input coordinates') ? 'Not Enough Locations' : 'Route Optimization Error'}
+            </AlertTitle>
+            <AlertDescription maxWidth="sm">
+              {route.error.includes('Not enough input coordinates') 
+                ? 'Add at least two locations to optimize a route.' 
+                : route.error}
+            </AlertDescription>
+          </Alert>
+        </Center>
+      </Box>
+    );
+  }
+
   return (
-    <Box
-      ref={mapContainer}
-      h="500px"
-      w="100%"
-      borderRadius="lg"
+    <Box 
+      ref={mapContainer} 
+      height="500px" 
+      width="100%" 
+      borderRadius="lg" 
       overflow="hidden"
-      boxShadow="base"
+      boxShadow="0 4px 6px rgba(0, 0, 0, 0.1)"
     />
   );
 };
 
-export default React.memo(MapDisplay); 
+MapDisplay.propTypes = {
+  locations: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      location: PropTypes.shape({
+        address: PropTypes.string,
+        lat: PropTypes.number,
+        lng: PropTypes.number
+      }).isRequired
+    })
+  ).isRequired,
+  route: PropTypes.shape({
+    directions: PropTypes.shape({
+      routes: PropTypes.arrayOf(
+        PropTypes.shape({
+          overview_path: PropTypes.arrayOf(
+            PropTypes.arrayOf(PropTypes.number)
+          )
+        })
+      )
+    }),
+    isLoading: PropTypes.bool,
+    error: PropTypes.string
+  }),
+  startLocation: PropTypes.shape({
+    address: PropTypes.string,
+    location: PropTypes.shape({
+      lat: PropTypes.number,
+      lng: PropTypes.number
+    })
+  })
+};
+
+export default MapDisplay; 

@@ -62,6 +62,8 @@ const RouteExplanation = ({ route }) => {
   };
 
   const getWeatherWarnings = (forecast) => {
+    if (!forecast) return [];
+    
     const warnings = [];
     if (forecast.temperature < 32 || forecast.temperature > 95) {
       warnings.push('Temperature risk');
@@ -108,97 +110,104 @@ const RouteExplanation = ({ route }) => {
         <VStack spacing={3} align="stretch">
           <Text fontWeight="semibold">Route Order with Current Weather:</Text>
           
-          {route.route.map((location, index) => {
-            const weatherScore = route.weatherScores.find(ws => ws.location === location.address);
-            const forecast = location.forecast?.[0];
-            const legDistance = index < route.route.length - 1 ? route.legs?.[index] : null;
-            if (!forecast) return null;
+          {route.route && route.route.length > 0 ? (
+            route.route.map((location, index) => {
+              const weatherScore = route.weatherScores && route.weatherScores.find(ws => ws.location === location.address);
+              const forecast = location.forecast && location.forecast[0];
+              const legDistance = index < route.route.length - 1 && route.legs ? route.legs[index] : null;
+              
+              if (!forecast) return null;
 
-            const warnings = getWeatherWarnings(forecast);
+              const warnings = getWeatherWarnings(forecast);
 
-            return (
-              <Box key={location.address}>
-                <Grid 
-                  templateColumns={{ base: "1fr", md: "1fr 1fr" }} 
-                  gap={3}
-                  p={3}
-                  borderWidth={1}
-                  borderRadius="md"
-                  borderColor={borderColor}
-                  bg={cardBgColor}
-                >
-                  {/* Location Info */}
-                  <GridItem>
-                    <VStack align="stretch" spacing={2}>
-                      <HStack>
-                        <Badge colorScheme="blue">{index + 1}</Badge>
-                        <Text fontWeight="medium" fontSize="sm">
-                          {location.address}
-                          {index === 0 && <Badge ml={2} colorScheme="green">Start</Badge>}
-                        </Text>
-                      </HStack>
-                      
-                      <HStack>
-                        <Tooltip label="Weather safety score">
-                          <Badge colorScheme={getScoreColorScheme(weatherScore?.score)}>
-                            {weatherScore?.score}% Safe
-                          </Badge>
-                        </Tooltip>
-                      </HStack>
-                    </VStack>
-                  </GridItem>
-
-                  {/* Current Weather */}
-                  <GridItem>
-                    <VStack align="stretch" spacing={2}>
-                      <Text fontSize="sm" fontWeight="medium">Current Weather:</Text>
-                      <Grid templateColumns="repeat(2, 1fr)" gap={2}>
-                        <HStack>
-                          <Icon as={FaThermometerHalf} />
-                          <Text fontSize="sm">{forecast.temperature}°F</Text>
-                        </HStack>
-                        <HStack>
-                          <Icon as={FaWind} />
-                          <Text fontSize="sm">{forecast.wind} mph</Text>
-                        </HStack>
-                        <HStack>
-                          <Icon as={FaCloud} />
-                          <Text fontSize="sm">{forecast.precipitation} mm/h</Text>
-                        </HStack>
-                        <HStack>
-                          <Icon as={FaEye} />
-                          <Text fontSize="sm">{(forecast.visibility / 1000).toFixed(1)} km</Text>
-                        </HStack>
-                      </Grid>
-
-                      {/* Weather Warnings */}
-                      {warnings.length > 0 && (
-                        <HStack spacing={2} fontSize="xs" color={warningColor}>
-                          <Icon as={FaExclamationTriangle} />
-                          <Text>{warnings.join(' • ')}</Text>
-                        </HStack>
-                      )}
-                    </VStack>
-                  </GridItem>
-                </Grid>
-
-                {/* Distance to Next Stop */}
-                {legDistance && (
-                  <HStack 
-                    justify="center" 
-                    fontSize="sm" 
-                    color="gray.500" 
-                    my={2}
-                    spacing={2}
+              return (
+                <Box key={location.address || index}>
+                  <Grid 
+                    templateColumns={{ base: "1fr", md: "1fr 1fr" }} 
+                    gap={3}
+                    p={3}
+                    borderWidth={1}
+                    borderRadius="md"
+                    borderColor={borderColor}
+                    bg={cardBgColor}
                   >
-                    <Icon as={FaArrowRight} />
-                    <Text>{formatDistance(legDistance.distance)}</Text>
-                    <Text>({formatDuration(legDistance.duration)})</Text>
-                  </HStack>
-                )}
-              </Box>
-            );
-          })}
+                    {/* Location Info */}
+                    <GridItem>
+                      <VStack align="stretch" spacing={2}>
+                        <HStack>
+                          <Badge colorScheme="blue">{index + 1}</Badge>
+                          <Text fontWeight="medium" fontSize="sm">
+                            {location.address || 'Unknown location'}
+                            {index === 0 && <Badge ml={2} colorScheme="green">Start</Badge>}
+                          </Text>
+                        </HStack>
+                        
+                        <HStack>
+                          <Tooltip label="Weather safety score">
+                            <Badge colorScheme={getScoreColorScheme(weatherScore?.score)}>
+                              {weatherScore?.score}% Safe
+                            </Badge>
+                          </Tooltip>
+                        </HStack>
+                      </VStack>
+                    </GridItem>
+
+                    {/* Current Weather */}
+                    <GridItem>
+                      <VStack align="stretch" spacing={2}>
+                        <Text fontSize="sm" fontWeight="medium">Current Weather:</Text>
+                        <Grid templateColumns="repeat(2, 1fr)" gap={2}>
+                          <HStack>
+                            <Icon as={FaThermometerHalf} />
+                            <Text fontSize="sm">{forecast.temperature}°F</Text>
+                          </HStack>
+                          <HStack>
+                            <Icon as={FaWind} />
+                            <Text fontSize="sm">{forecast.wind} mph</Text>
+                          </HStack>
+                          <HStack>
+                            <Icon as={FaCloud} />
+                            <Text fontSize="sm">{forecast.precipitation} mm/h</Text>
+                          </HStack>
+                          <HStack>
+                            <Icon as={FaEye} />
+                            <Text fontSize="sm">{(forecast.visibility / 1000).toFixed(1)} km</Text>
+                          </HStack>
+                        </Grid>
+
+                        {/* Weather Warnings */}
+                        {warnings.length > 0 && (
+                          <HStack spacing={2} fontSize="xs" color={warningColor}>
+                            <Icon as={FaExclamationTriangle} />
+                            <Text>{warnings.join(' • ')}</Text>
+                          </HStack>
+                        )}
+                      </VStack>
+                    </GridItem>
+                  </Grid>
+
+                  {/* Distance to Next Stop */}
+                  {legDistance && (
+                    <HStack 
+                      justify="center" 
+                      fontSize="sm" 
+                      color="gray.500" 
+                      my={2}
+                      spacing={2}
+                    >
+                      <Icon as={FaArrowRight} />
+                      <Text>{formatDistance(legDistance.distance)}</Text>
+                      <Text>({formatDuration(legDistance.duration)})</Text>
+                    </HStack>
+                  )}
+                </Box>
+              );
+            })
+          ) : (
+            <Box p={4} borderWidth={1} borderColor={borderColor} borderRadius="md">
+              <Text>No route information available. Add locations to see route details.</Text>
+            </Box>
+          )}
         </VStack>
 
         <Divider />
@@ -227,11 +236,11 @@ const RouteExplanation = ({ route }) => {
                 <Box>
                   <Text fontSize="sm" fontWeight="medium">Route Statistics:</Text>
                   <Text fontSize="sm" ml={4}>
-                    • Average distance between stops: {formatDistance(route.distance / (route.route.length - 1))}
+                    • Average distance between stops: {route.route && route.route.length > 1 ? formatDistance(route.distance / (route.route.length - 1)) : 'N/A'}
                     <br />
-                    • Locations with good weather: {route.weatherScores.filter(s => s.score >= 70).length}
+                    • Locations with good weather: {route.weatherScores ? route.weatherScores.filter(s => s.score >= 70).length : 0}
                     <br />
-                    • Locations with weather risks: {route.weatherScores.filter(s => s.score < 60).length}
+                    • Locations with weather risks: {route.weatherScores ? route.weatherScores.filter(s => s.score < 60).length : 0}
                   </Text>
                 </Box>
               </VStack>

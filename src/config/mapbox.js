@@ -1,2 +1,0 @@
-// Mapbox configuration
-export const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN || 'pk.eyJ1IjoiYWx5c3NhcGV0ZXJzb24iLCJhIjoiY2x0eHZqZnRqMDF1NzJrcGR0Z2J1Z2J1eiJ9.8JZQZQZQZQZQZQZQZQZQZQ'; 

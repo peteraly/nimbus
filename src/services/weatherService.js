@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 // Import API key
 import { OPENWEATHER_API_KEY } from '../config/apiKeys';
 
@@ -12,24 +14,79 @@ export const DEFAULT_THRESHOLDS = {
   }
 };
 
-// Main function to get weather data
+const WEATHER_API_BASE_URL = 'https://api.openweathermap.org/data/2.5';
+
+// Helper function to get date key (YYYY-MM-DD)
+const getDateKey = (date) => {
+  return new Date(date).toISOString().split('T')[0];
+};
+
+// Helper function to aggregate forecast data by day
+const aggregateForecastByDay = (forecastList) => {
+  const dailyForecasts = {};
+
+  forecastList.forEach(item => {
+    const dateKey = getDateKey(item.dt * 1000);
+    
+    if (!dailyForecasts[dateKey]) {
+      dailyForecasts[dateKey] = {
+        date: new Date(item.dt * 1000).toISOString(),
+        temperature: item.main.temp,
+        wind: item.wind.speed,
+        precipitation: item.rain ? item.rain['3h'] / 3 : 0,
+        visibility: item.visibility,
+        humidity: item.main.humidity,
+        pressure: item.main.pressure,
+        clouds: item.clouds.all,
+        description: item.weather[0].description,
+        icon: item.weather[0].icon,
+        readings: 1
+      };
+    } else {
+      const current = dailyForecasts[dateKey];
+      current.temperature = (current.temperature * current.readings + item.main.temp) / (current.readings + 1);
+      current.wind = (current.wind * current.readings + item.wind.speed) / (current.readings + 1);
+      current.precipitation = (current.precipitation * current.readings + (item.rain ? item.rain['3h'] / 3 : 0)) / (current.readings + 1);
+      current.visibility = (current.visibility * current.readings + item.visibility) / (current.readings + 1);
+      current.humidity = (current.humidity * current.readings + item.main.humidity) / (current.readings + 1);
+      current.pressure = (current.pressure * current.readings + item.main.pressure) / (current.readings + 1);
+      current.clouds = (current.clouds * current.readings + item.clouds.all) / (current.readings + 1);
+      current.readings += 1;
+    }
+  });
+
+  return Object.values(dailyForecasts);
+};
+
+/**
+ * Get weather data for a location
+ * @param {Object} location - Location object with coordinates and address
+ * @returns {Promise<Object>} Weather data including current conditions and forecast
+ */
 export const getWeatherData = async (location) => {
   try {
-    console.log(`Fetching weather data for location: ${location.address}`);
+    if (!location || !location.coordinates) {
+      throw new Error('Invalid location object: missing coordinates');
+    }
+
+    console.log(`Fetching weather data for location: ${location.address || 'Unknown'}`);
+    
+    // Coordinates should be [longitude, latitude]
+    const [longitude, latitude] = location.coordinates;
     
     // Fetch current weather
-    const currentResponse = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${location.lat}&lon=${location.lng}&appid=${OPENWEATHER_API_KEY}&units=imperial`
+    const currentResponse = await axios.get(
+      `${WEATHER_API_BASE_URL}/weather?lat=${latitude}&lon=${longitude}&appid=${OPENWEATHER_API_KEY}&units=imperial`
     );
-    const currentData = await currentResponse.json();
     
     // Fetch forecast data
-    const forecastResponse = await fetch(
-      `https://api.openweathermap.org/data/2.5/forecast?lat=${location.lat}&lon=${location.lng}&appid=${OPENWEATHER_API_KEY}&units=imperial`
+    const forecastResponse = await axios.get(
+      `${WEATHER_API_BASE_URL}/forecast?lat=${latitude}&lon=${longitude}&appid=${OPENWEATHER_API_KEY}&units=imperial`
     );
-    const forecastData = await forecastResponse.json();
     
-    if (currentData.cod === 200 && forecastData.cod === '200') {
+    if (currentResponse.data.cod === 200 && forecastResponse.data.cod === '200') {
+      const currentData = currentResponse.data;
+      
       // Process current weather
       const currentWeather = {
         temperature: currentData.main.temp,
@@ -37,31 +94,26 @@ export const getWeatherData = async (location) => {
         precipitation: currentData.rain ? currentData.rain['1h'] : 0,
         visibility: currentData.visibility,
         description: currentData.weather[0].description,
-        icon: currentData.weather[0].icon
+        icon: currentData.weather[0].icon,
+        humidity: currentData.main.humidity,
+        sunrise: currentData.sys.sunrise,
+        sunset: currentData.sys.sunset
       };
       
-      // Process forecast data
-      const forecast = forecastData.list.map(item => ({
-        date: new Date(item.dt * 1000).toISOString(),
-        temperature: item.main.temp,
-        wind: item.wind.speed,
-        precipitation: item.rain ? item.rain['3h'] / 3 : 0, // Convert 3h precipitation to hourly
-        visibility: item.visibility,
-        humidity: item.main.humidity,
-        pressure: item.main.pressure,
-        clouds: item.clouds.all,
-        description: item.weather[0].description,
-        icon: item.weather[0].icon
-      }));
+      // Process and aggregate forecast data by day
+      const forecast = aggregateForecastByDay(forecastResponse.data.list);
       
-      console.log(`Weather data received for ${location.address}:`, { currentWeather, forecastCount: forecast.length });
+      console.log(`Weather data received for ${location.address || 'Unknown'}:`, { 
+        currentWeather, 
+        forecastCount: forecast.length 
+      });
       
       return {
         current: currentWeather,
         forecast: forecast
       };
     } else {
-      console.error('Failed to fetch weather data:', currentData, forecastData);
+      console.error('Failed to fetch weather data:', currentResponse.data, forecastResponse.data);
       throw new Error('Failed to fetch weather data');
     }
   } catch (error) {
@@ -70,27 +122,71 @@ export const getWeatherData = async (location) => {
   }
 };
 
-// Check if weather conditions are safe for drone operations
-export const isWeatherSafe = (weatherData, thresholds = DEFAULT_THRESHOLDS) => {
-  const {
-    windSpeed,
-    precipitation,
-    visibility,
-    temperature
-  } = weatherData;
+/**
+ * Get sunrise and sunset times for a location
+ * @param {Array} coordinates - [longitude, latitude] array
+ * @param {Date} date - Optional date to get times for
+ * @returns {Promise<Object>} - Sunrise and sunset times
+ */
+export async function getSunriseSunset(coordinates, date = new Date()) {
+  try {
+    if (!Array.isArray(coordinates) || coordinates.length !== 2) {
+      throw new Error('Invalid coordinates: must be [longitude, latitude] array');
+    }
 
-  return (
-    windSpeed <= thresholds.windSpeed &&
-    precipitation <= thresholds.precipitation &&
-    visibility >= thresholds.visibility &&
-    temperature >= thresholds.temperature.min &&
-    temperature <= thresholds.temperature.max
-  );
-};
+    const [longitude, latitude] = coordinates;
+    
+    const response = await axios.get(
+      `${WEATHER_API_BASE_URL}/weather?lat=${latitude}&lon=${longitude}&appid=${OPENWEATHER_API_KEY}&units=imperial`
+    );
 
-// Calculate weather safety score (0-100)
+    const { sys } = response.data;
+    
+    // Convert Unix timestamps to Date objects in local time
+    const sunrise = new Date(sys.sunrise * 1000);
+    const sunset = new Date(sys.sunset * 1000);
+
+    // If date is different from today, adjust the times
+    if (date) {
+      const targetDate = new Date(date);
+      sunrise.setFullYear(targetDate.getFullYear());
+      sunrise.setMonth(targetDate.getMonth());
+      sunrise.setDate(targetDate.getDate());
+      
+      sunset.setFullYear(targetDate.getFullYear());
+      sunset.setMonth(targetDate.getMonth());
+      sunset.setDate(targetDate.getDate());
+    }
+
+    return {
+      sunrise: sunrise.toISOString(),
+      sunset: sunset.toISOString(),
+      dayLength: (sunset - sunrise) / (1000 * 60) // length of day in minutes
+    };
+  } catch (error) {
+    console.error('Error fetching sunrise/sunset data:', error);
+    // Return default values for testing/fallback (sunrise: 7 AM, sunset: 7 PM)
+    const defaultDate = date || new Date();
+    const sunrise = new Date(defaultDate);
+    sunrise.setHours(7, 0, 0, 0);
+    const sunset = new Date(defaultDate);
+    sunset.setHours(19, 0, 0, 0);
+    
+    return {
+      sunrise: sunrise.toISOString(),
+      sunset: sunset.toISOString(),
+      dayLength: 12 * 60 // 12 hours in minutes
+    };
+  }
+}
+
+/**
+ * Calculate weather score
+ * @param {Object} weatherData - Weather data object
+ * @returns {number} Score between 0 and 100
+ */
 export const calculateWeatherScore = (weatherData, thresholds = DEFAULT_THRESHOLDS) => {
-  if (!weatherData) return 0;
+  if (!weatherData || !weatherData.current) return 0;
   
   let score = 100;
   const {
@@ -98,7 +194,7 @@ export const calculateWeatherScore = (weatherData, thresholds = DEFAULT_THRESHOL
     precipitation,
     visibility,
     temperature
-  } = weatherData;
+  } = weatherData.current;
 
   // Wind speed impact
   if (wind_speed > thresholds.windSpeed * 0.8) {
@@ -132,4 +228,35 @@ export const calculateWeatherScore = (weatherData, thresholds = DEFAULT_THRESHOL
   }
 
   return Math.max(0, score);
+};
+
+/**
+ * Check if weather conditions are safe for drone operation
+ * @param {Object} weatherData - Weather data object
+ * @param {Object} thresholds - Optional custom thresholds
+ * @returns {boolean} Whether conditions are safe
+ */
+export const isWeatherSafe = (weatherData, thresholds = DEFAULT_THRESHOLDS) => {
+  if (!weatherData || !weatherData.current) return false;
+
+  const { temperature, wind_speed, description } = weatherData.current;
+
+  // Check temperature
+  if (temperature < thresholds.temperature.min || temperature > thresholds.temperature.max) {
+    return false;
+  }
+
+  // Check wind speed
+  if (wind_speed > thresholds.windSpeed) {
+    return false;
+  }
+
+  // Check weather conditions
+  const conditions = description.toLowerCase();
+  const unsafeConditions = ['storm', 'thunder', 'rain', 'snow', 'sleet', 'hail'];
+  if (unsafeConditions.some(condition => conditions.includes(condition))) {
+    return false;
+  }
+
+  return true;
 }; 

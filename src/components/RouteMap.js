@@ -1,86 +1,112 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { Box, Spinner, Center } from '@chakra-ui/react';
+import { Box, Text, VStack, Alert, AlertIcon, AlertTitle, AlertDescription, Link, Button } from '@chakra-ui/react';
+import PropTypes from 'prop-types';
+import { MAPBOX_ACCESS_TOKEN } from '../config/apiKeys';
 
-// Set Mapbox token
-mapboxgl.accessToken = 'pk.eyJ1IjoicGV0ZXJhbHkiLCJhIjoiY205N2gzMzU1MDdieDJrcHh3ZnpuNXVteCJ9.8N9ZoaU05cVRUGEGAwA5uw';
+// Set the Mapbox access token
+mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
-const RouteMap = ({ route, startLocation, locations }) => {
+const RouteMap = ({
+  locations = [],
+  route = null,
+  onMarkerClick,
+  onRouteClick,
+}) => {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const markers = useRef([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const routeLayer = useRef(null);
+  const [error, setError] = useState(null);
 
-  // Function to update route on map
-  const updateRoute = useCallback((mapInstance) => {
-    if (!route?.waypoints) return;
+  useEffect(() => {
+    if (!mapContainer.current) return;
+
+    // Initialize map if it hasn't been created yet
+    if (!map.current) {
+      try {
+        map.current = new mapboxgl.Map({
+          container: mapContainer.current,
+          style: 'mapbox://styles/mapbox/streets-v11',
+          center: [-95.7129, 37.0902], // Center of US
+          zoom: 3
+        });
+
+        // Add navigation controls
+        map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+        // Add error handling
+        map.current.on('error', (e) => {
+          console.error('Mapbox error:', e);
+          setError('Failed to load map. Please check your Mapbox access token.');
+        });
+      } catch (err) {
+        console.error('Error initializing map:', err);
+        setError('Failed to initialize map. Please check your Mapbox access token.');
+        return;
+      }
+    }
+
+    // Clean up previous markers and route
+    markers.current.forEach(marker => marker.remove());
+    markers.current = [];
+
+    if (routeLayer.current) {
+      if (map.current.getLayer('route')) {
+        map.current.removeLayer('route');
+      }
+      if (map.current.getSource('route')) {
+        map.current.removeSource('route');
+      }
+    }
+
+    // Add markers for all locations
+    const allLocations = locations;
     
-    try {
-      // Clear existing markers
-      markers.current.forEach(marker => marker.remove());
-      markers.current = [];
-
-      // Remove existing route layers and sources
-      if (mapInstance.getLayer('route')) {
-        mapInstance.removeLayer('route');
-      }
-      if (mapInstance.getSource('route')) {
-        mapInstance.removeSource('route');
-      }
-
-      // Add markers for each waypoint
-      route.waypoints.forEach((waypoint, index) => {
-        if (!waypoint.location?.latitude || !waypoint.location?.longitude) {
-          console.warn(`Invalid coordinates for waypoint ${index}:`, waypoint);
-          return;
-        }
-
-        const { latitude, longitude } = waypoint.location;
-        
-        // Create marker element
-        const el = document.createElement('div');
-        el.className = 'marker';
-        el.style.backgroundColor = index === 0 ? '#4CAF50' : '#2196F3';
-        el.style.width = '20px';
-        el.style.height = '20px';
-        el.style.borderRadius = '50%';
-        el.style.border = '2px solid white';
-        el.style.boxShadow = '0 0 10px rgba(0,0,0,0.3)';
-
-        // Create popup content with weather info if available
-        const popupContent = `
+    allLocations.forEach((location, index) => {
+      // Create marker element
+      const el = document.createElement('div');
+      el.className = 'marker';
+      el.style.width = '25px';
+      el.style.height = '25px';
+      el.style.borderRadius = '50%';
+      el.style.backgroundColor = index === 0 ? '#4CAF50' : '#2196F3';
+      el.style.border = '2px solid white';
+      el.style.boxShadow = '0 0 10px rgba(0,0,0,0.3)';
+      el.style.cursor = 'pointer';
+      
+      // Create popup
+      const popup = new mapboxgl.Popup({ offset: 25 })
+        .setHTML(`
           <div style="padding: 10px;">
-            <strong>${waypoint.location.address}</strong>
-            ${waypoint.weather ? `
-              <br>Temperature: ${waypoint.weather.temperature}°C
-              <br>Wind: ${waypoint.weather.windSpeed} m/s
-              <br>Visibility: ${waypoint.weather.visibility}m
-            ` : ''}
+            <strong>${index === 0 ? 'Start' : `Stop ${index}`}</strong><br>
+            ${location.address}
           </div>
-        `;
+        `);
+      
+      // Add marker to map
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([location.coordinates[0], location.coordinates[1]])
+        .setPopup(popup)
+        .addTo(map.current);
+      
+      markers.current.push(marker);
+    });
 
-        // Add marker to map
-        const marker = new mapboxgl.Marker(el)
-          .setLngLat([longitude, latitude])
-          .setPopup(new mapboxgl.Popup().setHTML(popupContent))
-          .addTo(mapInstance);
-        
-        markers.current.push(marker);
-      });
-
-      // Add route line if geometry exists
-      if (route.geometry?.coordinates?.length > 0) {
-        mapInstance.addSource('route', {
+    // Add route line if route exists
+    if (route && route.geometry && route.properties) {
+      map.current.on('load', () => {
+        map.current.addSource('route', {
           type: 'geojson',
           data: {
             type: 'Feature',
-            properties: {},
+            properties: route.properties,
             geometry: route.geometry
           }
         });
 
-        mapInstance.addLayer({
+        map.current.addLayer({
           id: 'route',
           type: 'line',
           source: 'route',
@@ -89,126 +115,101 @@ const RouteMap = ({ route, startLocation, locations }) => {
             'line-cap': 'round'
           },
           paint: {
-            'line-color': '#2196F3',
-            'line-width': 4,
-            'line-opacity': 0.8
+            'line-color': '#3887be',
+            'line-width': 5,
+            'line-opacity': 0.75
           }
         });
 
-        // Fit map to route bounds with padding
-        const coordinates = route.geometry.coordinates;
-        const bounds = coordinates.reduce((bounds, coord) => {
-          return bounds.extend(coord);
-        }, new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
-
-        mapInstance.fitBounds(bounds, {
-          padding: { top: 50, bottom: 50, left: 50, right: 50 },
-          duration: 0
+        // Fit map to route bounds
+        const bounds = new mapboxgl.LngLatBounds();
+        route.geometry.coordinates.forEach(coord => {
+          bounds.extend([coord[0], coord[1]]);
         });
-      }
-    } catch (error) {
-      console.error('Error updating route on map:', error);
-    }
-  }, [route]);
-
-  // Initialize map
-  useEffect(() => {
-    if (!mapContainer.current) return;
-
-    // Clean up existing map instance
-    if (map.current) {
-      markers.current.forEach(marker => marker.remove());
-      map.current.remove();
-    }
-
-    // Create new map instance
-    const newMap = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/streets-v11',
-      center: [-95.7129, 37.0902], // Default center
-      zoom: 4,
-      interactive: false,
-      attributionControl: false
-    });
-
-    // Add controls when style is loaded
-    newMap.on('style.load', () => {
-      newMap.addControl(new mapboxgl.NavigationControl(), 'top-right');
-      newMap.addControl(new mapboxgl.AttributionControl(), 'bottom-right');
-      
-      // Enable interactions
-      newMap.scrollZoom.enable();
-      newMap.dragRotate.enable();
-      newMap.dragPan.enable();
-      newMap.keyboard.enable();
-      newMap.doubleClickZoom.enable();
-      newMap.touchZoomRotate.enable();
-      newMap.interactive = true;
-      
-      // Update center if we have a start location
-      if (startLocation?.longitude && startLocation?.latitude) {
-        newMap.setCenter([startLocation.longitude, startLocation.latitude]);
-      }
-      
-      // Update route if available
-      if (route?.waypoints) {
-        updateRoute(newMap);
-      }
-      
-      setIsLoading(false);
-    });
-
-    // Store map reference
-    map.current = newMap;
-
-    return () => {
-      if (map.current) {
-        markers.current.forEach(marker => marker.remove());
-        map.current.remove();
-        map.current = null;
-      }
-    };
-  }, [startLocation, route, updateRoute]);
-
-  // Update route when route changes
-  useEffect(() => {
-    if (!map.current || !route?.waypoints) return;
-    
-    // Only update route if map is loaded
-    if (map.current.isStyleLoaded()) {
-      updateRoute(map.current);
-    } else {
-      map.current.once('style.load', () => {
-        updateRoute(map.current);
+        map.current.fitBounds(bounds, { padding: 50 });
       });
     }
-  }, [route, updateRoute]);
+
+    // Cleanup function
+    return () => {
+      markers.current.forEach(marker => marker.remove());
+      if (map.current) {
+        if (map.current.getLayer('route')) {
+          map.current.removeLayer('route');
+        }
+        if (map.current.getSource('route')) {
+          map.current.removeSource('route');
+        }
+      }
+    };
+  }, [locations, route]);
+
+  if (error) {
+    return (
+      <Box
+        p={4}
+        bg="white"
+        borderRadius="lg"
+        boxShadow="sm"
+        borderWidth="1px"
+        borderColor="gray.200"
+        height="500px"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+      >
+        <Alert status="error" variant="subtle" flexDirection="column" alignItems="center" justifyContent="center" textAlign="center" height="200px">
+          <AlertIcon boxSize="40px" mr={0} />
+          <AlertTitle mt={4} mb={1} fontSize="lg">
+            Map Error
+          </AlertTitle>
+          <AlertDescription maxWidth="sm">
+            {error}
+          </AlertDescription>
+          <VStack mt={4} spacing={2}>
+            <Text fontSize="sm">To fix this issue:</Text>
+            <Link href="https://account.mapbox.com/" isExternal color="blue.500">
+              <Button size="sm" colorScheme="blue">
+                Get a Mapbox Access Token
+              </Button>
+            </Link>
+            <Text fontSize="xs" color="gray.500">
+              Then update the token in src/config/apiKeys.js
+            </Text>
+          </VStack>
+        </Alert>
+      </Box>
+    );
+  }
 
   return (
-    <Box
-      position="relative"
-      height="500px"
-      width="100%"
-      borderRadius="lg"
-      overflow="hidden"
-      borderWidth="1px"
-      borderColor="gray.200"
-    >
-      <Box ref={mapContainer} height="100%" width="100%" />
-      {isLoading && (
-        <Center
-          position="absolute"
-          top="0"
-          left="0"
-          right="0"
-          bottom="0"
-          bg="rgba(255, 255, 255, 0.8)"
-        >
-          <Spinner size="xl" color="blue.500" />
-        </Center>
-      )}
-    </Box>
+    <div 
+      ref={mapContainer} 
+      style={{ 
+        height: '500px', 
+        width: '100%',
+        borderRadius: '8px',
+        overflow: 'hidden',
+        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+      }} 
+    />
   );
+};
+
+RouteMap.propTypes = {
+  locations: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      address: PropTypes.string.isRequired,
+      coordinates: PropTypes.arrayOf(PropTypes.number).isRequired,
+    })
+  ).isRequired,
+  route: PropTypes.shape({
+    geometry: PropTypes.object.isRequired,
+    properties: PropTypes.object.isRequired,
+  }),
+  onMarkerClick: PropTypes.func,
+  onRouteClick: PropTypes.func,
 };
 
 export default RouteMap; 

@@ -1,127 +1,192 @@
 import { calculateWeatherScore } from '../services/weatherService';
 
+/**
+ * Cache for storing previously calculated routes to improve performance
+ * @type {Map<string, Object>}
+ */
+const routeCache = new Map();
+
+/**
+ * Maximum number of routes to store in cache to prevent memory issues
+ * @type {number}
+ */
+const MAX_CACHE_SIZE = 100;
+
+/**
+ * Debounce function to prevent too many API calls
+ * @param {Function} func - Function to debounce
+ * @param {number} wait - Wait time in milliseconds
+ * @returns {Function} - Debounced function
+ */
+const debounce = (func, wait) => {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
+
+/**
+ * Generate a cache key for routes based on locations
+ * @param {Array<Object>} locations - Array of location objects
+ * @param {Object} startLocation - Optional start location
+ * @returns {string} - Cache key
+ */
+const generateCacheKey = (locations, startLocation) => {
+  if (!Array.isArray(locations)) {
+    throw new Error('Locations must be an array');
+  }
+  
+  const locationStrings = locations.map(loc => {
+    if (!loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number') {
+      throw new Error('Invalid location object');
+    }
+    return `${loc.lat},${loc.lng}`;
+  }).sort();
+  
+  const startString = startLocation 
+    ? `${startLocation.lat},${startLocation.lng}` 
+    : '';
+    
+  return `${startString}-${locationStrings.join('-')}`;
+};
+
+/**
+ * Calculate weather score for a location
+ * @param {Object} weatherData - Weather data object
+ * @returns {number} - Weather score
+ */
 export const calculateLocationWeatherScore = (weatherData) => {
   if (!weatherData) return 0;
   return calculateWeatherScore(weatherData.current || weatherData);
 };
 
-export const calculateWaypointDistances = (directionsData) => {
-  if (!directionsData || !directionsData.routes || !directionsData.routes[0] || !directionsData.routes[0].legs) {
-    return [];
-  }
-
-  // Extract distances and durations from route legs
-  return directionsData.routes[0].legs.map(leg => ({
-    distance: leg.distance / 1000, // Convert meters to kilometers
-    duration: leg.duration // Duration in seconds
-  }));
-};
-
-export const getOptimizedRoute = async (locations, weatherData, startLocation = null) => {
+/**
+ * Get optimized route using Mapbox Directions API
+ * @param {Array<Object>} locations - Array of location objects
+ * @param {Object} weatherData - Weather data object
+ * @param {Object} startLocation - Optional start location
+ * @returns {Promise<Object>} - Optimized route
+ */
+const getOptimizedRoute = async (locations, weatherData, startLocation) => {
   try {
-    // Ensure weatherData is an object
-    const weatherDataObj = weatherData || {};
-    
-    // Remove duplicate locations by address
-    const uniqueLocations = [];
-    const seenAddresses = new Set();
-    
-    // Add start location to seen addresses if it exists
-    if (startLocation && startLocation.address) {
-      seenAddresses.add(startLocation.address);
+    if (!locations || locations.length === 0) {
+      throw new Error('No locations provided for route optimization');
+    }
+
+    const mapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
+    if (!mapboxToken) {
+      throw new Error('Mapbox API token is missing');
     }
     
-    // Filter out duplicate locations
+    // Prepare waypoints for the API call
+    const waypoints = [];
+    
+    // Add start location if provided
+    if (startLocation) {
+      waypoints.push(`${startLocation.lng},${startLocation.lat}`);
+    }
+    
+    // Add all other locations
     locations.forEach(location => {
-      if (!seenAddresses.has(location.address)) {
-        seenAddresses.add(location.address);
-        uniqueLocations.push({
-          ...location,
-          weather: weatherDataObj[location.address] // Attach weather data to location
+      waypoints.push(`${location.lng},${location.lat}`);
+    });
+    
+    // Check if we have at least 2 waypoints
+    if (waypoints.length < 2) {
+      throw new Error('Not enough input coordinates given; minimum number of coordinates is 2');
+    }
+    
+    // Construct the API URL
+    const waypointsString = waypoints.join(';');
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${waypointsString}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+    
+    // Make the API call
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Mapbox API error: ${response.statusText}. ${errorData.message || ''}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.routes || data.routes.length === 0) {
+      throw new Error('No routes found');
+    }
+    
+    // Get the first route
+    const route = data.routes[0];
+    
+    // Calculate weather scores for each location
+    const locationScores = [];
+    
+    // Add start location score if provided
+    if (startLocation && weatherData[startLocation.address]) {
+      locationScores.push({
+        location: startLocation,
+        score: calculateLocationWeatherScore(weatherData[startLocation.address])
+      });
+    }
+    
+    // Add scores for other locations
+    locations.forEach(location => {
+      if (weatherData[location.address]) {
+        locationScores.push({
+          location: location,
+          score: calculateLocationWeatherScore(weatherData[location.address])
         });
       }
     });
     
-    // Calculate weather scores for each location
-    const locationsWithScores = uniqueLocations.map(location => ({
-      ...location,
-      weatherScore: calculateLocationWeatherScore(weatherDataObj[location.address])
-    }));
-
-    // Sort locations by weather score (highest to lowest)
-    const sortedLocations = [...locationsWithScores].sort((a, b) => b.weatherScore - a.weatherScore);
-
-    // Construct waypoints string for Mapbox Directions API
-    let waypoints = '';
-    
-    // Add start location if provided
-    if (startLocation) {
-      waypoints = `${startLocation.lng},${startLocation.lat}`;
-    }
-    
-    // Add destination locations
-    const destinationWaypoints = sortedLocations.map(loc => `${loc.lng},${loc.lat}`).join(';');
-    
-    // Combine start and destinations
-    waypoints = waypoints ? `${waypoints};${destinationWaypoints}` : destinationWaypoints;
-    
-    const mapboxToken = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
-
-    // Get directions from Mapbox
-    const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${waypoints}?geometries=geojson&overview=full&annotations=distance,duration&access_token=${mapboxToken}`
-    );
-    const data = await response.json();
-
-    if (data.code !== 'Ok') {
-      throw new Error('Failed to get directions from Mapbox');
-    }
-
-    // Calculate distances between waypoints
-    const waypointDistances = calculateWaypointDistances(data);
-
-    // Transform the route data to match our application's format
-    const route = {
-      distance: data.routes[0].distance,
-      duration: data.routes[0].duration,
-      coordinates: data.routes[0].geometry.coordinates.map(coord => ({
-        lat: coord[1],
-        lng: coord[0]
-      })),
-      waypoints: []
+    // Return the optimized route with weather information
+    return {
+      geometry: route.geometry,
+      distance: route.distance,
+      duration: route.duration,
+      locationScores: locationScores,
+      isLoading: false,
+      error: null
     };
+  } catch (error) {
+    console.error('Error in getOptimizedRoute:', error);
+    throw error;
+  }
+};
 
-    // Add start location as first waypoint if provided
-    if (startLocation) {
-      route.waypoints.push({
-        location: {
-          ...startLocation,
-          weather: weatherDataObj[startLocation.address] // Attach weather data to start location
-        },
-        weatherScore: calculateLocationWeatherScore(weatherDataObj[startLocation.address]),
-        distance: 0,
-        duration: 0
-      });
+/**
+ * Optimized route calculation function with caching
+ * @param {Array<Object>} locations - Array of location objects
+ * @param {Object} weatherData - Weather data object
+ * @param {Object} startLocation - Optional start location
+ * @returns {Promise<Object>} - Optimized route
+ */
+export const calculateOptimizedRoute = async (locations, weatherData, startLocation) => {
+  try {
+    // Generate cache key
+    const cacheKey = generateCacheKey(locations, startLocation);
+    
+    // Check cache first
+    if (routeCache.has(cacheKey)) {
+      console.log('Using cached route');
+      return routeCache.get(cacheKey);
     }
-
-    // Add destination locations with their distances and weather data
-    sortedLocations.forEach((loc, index) => {
-      const distanceData = waypointDistances[index] || { distance: 0, duration: 0 };
-      route.waypoints.push({
-        location: {
-          ...loc,
-          weather: weatherDataObj[loc.address] // Attach weather data to location
-        },
-        weatherScore: loc.weatherScore,
-        distance: distanceData.distance,
-        duration: distanceData.duration
-      });
-    });
-
-    // Calculate safety percentage based on weather scores
-    const avgWeatherScore = route.waypoints.reduce((sum, wp) => sum + wp.weatherScore, 0) / route.waypoints.length;
-    route.safetyPercentage = Math.round(avgWeatherScore * 100);
-
+    
+    // If not in cache, calculate new route
+    const route = await getOptimizedRoute(locations, weatherData, startLocation);
+    
+    // Store in cache
+    routeCache.set(cacheKey, route);
+    
+    // Limit cache size to prevent memory issues
+    if (routeCache.size > MAX_CACHE_SIZE) {
+      const firstKey = routeCache.keys().next().value;
+      routeCache.delete(firstKey);
+    }
+    
     return route;
   } catch (error) {
     console.error('Error calculating optimized route:', error);
@@ -129,12 +194,45 @@ export const getOptimizedRoute = async (locations, weatherData, startLocation = 
   }
 };
 
+/**
+ * Debounced version of the route calculation
+ * @type {Function}
+ */
+export const debouncedCalculateRoute = debounce(calculateOptimizedRoute, 500);
+
+/**
+ * Clear route cache
+ */
+export const clearRouteCache = () => {
+  routeCache.clear();
+};
+
+/**
+ * Get nearby places using Mapbox API
+ * @param {Object} location - Location object with lat and lng
+ * @param {number} radius - Search radius in meters
+ * @returns {Promise<Array<Object>>} - Array of nearby places
+ */
 export const getNearbyPlaces = async (location, radius = 1000) => {
   try {
-    const mapboxToken = process.env.REACT_APP_MAPBOX_ACCESS_TOKEN;
+    if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
+      throw new Error('Invalid location object');
+    }
+    
+    const mapboxToken = process.env.REACT_APP_MAPBOX_TOKEN;
+    if (!mapboxToken) {
+      throw new Error('Mapbox API token is missing');
+    }
+    
     const response = await fetch(
       `https://api.mapbox.com/geocoding/v5/mapbox.places/${location.lng},${location.lat}.json?types=poi&radius=${radius}&access_token=${mapboxToken}`
     );
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Mapbox API error: ${response.statusText}. ${errorData.message || ''}`);
+    }
+    
     const data = await response.json();
     
     return data.features.map(feature => ({

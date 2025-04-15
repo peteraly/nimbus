@@ -1,144 +1,143 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   VStack,
-  HStack,
-  Heading,
   Text,
-  Badge,
-  Radio,
-  RadioGroup,
-  SimpleGrid,
+  Select,
+  Button,
   useColorModeValue,
+  RadioGroup,
+  Radio,
+  Stack,
+  Flex,
+  Divider,
   Icon,
+  useToast,
 } from '@chakra-ui/react';
-import { FaRoute, FaClock, FaInfoCircle } from 'react-icons/fa';
+import { FaRoute, FaSun } from 'react-icons/fa';
+import PropTypes from 'prop-types';
 
-const RouteOptions = ({ route, onSelectRoute, selectedRouteIndex }) => {
-  const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
-  const hoverBgColor = useColorModeValue('gray.50', 'gray.700');
-  
-  // Function to get color based on safety percentage
-  const getSafetyColor = (percentage) => {
-    if (percentage >= 80) return 'green';
-    if (percentage >= 60) return 'yellow';
-    if (percentage >= 40) return 'orange';
-    return 'red';
-  };
-  
-  // Function to format duration in minutes to hours and minutes
-  const formatDuration = (minutes) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-  };
-  
-  // Function to format distance in meters to kilometers
-  const formatDistance = (meters) => {
-    return (meters / 1000).toFixed(1) + ' km';
-  };
+const RouteOptions = ({ 
+  locations = [], 
+  selectedStartPoint, 
+  onStartPointChange,
+  onOptimize 
+}) => {
+  const [optimizationType, setOptimizationType] = React.useState('distance');
+  const bgColor = useColorModeValue('white', 'gray.700');
+  const borderColor = useColorModeValue('gray.200', 'gray.600');
+  const toast = useToast();
+  const [loading, setLoading] = useState(false);
 
-  if (!route) {
-    return (
-      <Box p={4} borderWidth={1} borderColor={borderColor} borderRadius="md" bg={bgColor}>
-        <Text>Add at least two locations to see route options.</Text>
-      </Box>
-    );
-  }
-
-  // Create route options based on the optimized route
-  const routeOptions = [
-    {
-      name: 'Weather-Optimized Route',
-      description: 'Route optimized for best weather conditions',
-      safetyPercentage: route.safetyPercentage || 0,
-      distance: route.distance || 0,
-      duration: route.duration || 0,
-      weatherScore: route.safetyPercentage || 0,
-      route: route.route || [],
-      weatherHighlights: `Overall safety score: ${route.safetyPercentage || 0}%`
+  const handleOptimize = async () => {
+    if (!selectedStartPoint || locations.length < 2) return;
+    
+    setLoading(true);
+    try {
+      onOptimize({
+        startPoint: locations.find(loc => loc.id === selectedStartPoint),
+        optimizationType
+      });
+    } catch (error) {
+      console.error('Route generation failed:', error);
+      toast({
+        title: 'Route Generation Failed',
+        description: 'Please check your selections and try again.',
+        status: 'error',
+      });
+    } finally {
+      setLoading(false);
     }
-  ];
-
-  // Ensure selectedRouteIndex is valid
-  const validSelectedIndex = selectedRouteIndex !== undefined && 
-                            selectedRouteIndex >= 0 && 
-                            selectedRouteIndex < routeOptions.length ? 
-                            selectedRouteIndex : 0;
+  };
 
   return (
-    <Box>
-      <Text mb={4} color="gray.600">
-        Select your preferred route based on weather conditions and travel distance.
-      </Text>
-      
-      <RadioGroup value={validSelectedIndex.toString()} onChange={(value) => onSelectRoute(parseInt(value))}>
-        <VStack spacing={4} align="stretch">
-          {routeOptions.map((option, index) => (
-            <Box
-              key={index}
-              p={4}
-              borderWidth={1}
-              borderColor={validSelectedIndex === index ? 'blue.500' : borderColor}
-              borderRadius="md"
-              bg={validSelectedIndex === index ? 'blue.50' : bgColor}
-              _hover={{ bg: hoverBgColor }}
-              transition="all 0.2s"
-              cursor="pointer"
-              onClick={() => onSelectRoute(index)}
-            >
-              <HStack align="start" spacing={4}>
-                <Radio value={index.toString()} size="lg" mt={1} />
-                
-                <VStack align="start" spacing={2} flex={1}>
-                  <HStack justify="space-between" width="100%">
-                    <Heading size="sm">{option.name}</Heading>
-                    <Badge 
-                      colorScheme={getSafetyColor(option.safetyPercentage)}
-                      fontSize="sm"
-                      px={2}
-                      py={1}
-                      borderRadius="full"
-                    >
-                      {option.safetyPercentage}% Safe
-                    </Badge>
-                  </HStack>
-                  
-                  <Text fontSize="sm" color="gray.600">{option.description}</Text>
-                  
-                  <SimpleGrid columns={2} spacing={4} width="100%">
-                    <Box>
-                      <HStack>
-                        <Icon as={FaRoute} color="blue.500" />
-                        <Text fontWeight="bold">Distance</Text>
-                      </HStack>
-                      <Text>{formatDistance(option.distance)}</Text>
-                    </Box>
-                    <Box>
-                      <HStack>
-                        <Icon as={FaClock} color="blue.500" />
-                        <Text fontWeight="bold">Duration</Text>
-                      </HStack>
-                      <Text>{formatDuration(Math.round(option.duration / 60))}</Text>
-                    </Box>
-                  </SimpleGrid>
-                  
-                  <Box width="100%">
-                    <HStack>
-                      <Icon as={FaInfoCircle} color="blue.500" />
-                      <Text fontWeight="bold">Weather Highlights</Text>
-                    </HStack>
-                    <Text fontSize="sm">{option.weatherHighlights}</Text>
+    <Box p={4} bg={bgColor} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
+      <VStack spacing={4} align="stretch">
+        <Text fontWeight="bold" fontSize="lg">Route Options</Text>
+        
+        <Box>
+          <Text mb={2}>Starting Point</Text>
+          <Select
+            value={selectedStartPoint}
+            onChange={(e) => onStartPointChange(e.target.value)}
+            placeholder="Select starting location"
+            isDisabled={locations.length === 0}
+          >
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.address}
+              </option>
+            ))}
+          </Select>
+        </Box>
+
+        <Divider />
+
+        <Box>
+          <Text mb={2}>Optimization Strategy</Text>
+          <RadioGroup value={optimizationType} onChange={setOptimizationType}>
+            <Stack spacing={4}>
+              <Radio value="distance">
+                <Flex align="center" gap={2}>
+                  <Icon as={FaRoute} />
+                  <Box>
+                    <Text>Most Efficient Route</Text>
+                    <Text fontSize="sm" color="gray.500">
+                      Optimizes for shortest total distance and driving time
+                    </Text>
                   </Box>
-                </VStack>
-              </HStack>
-            </Box>
-          ))}
-        </VStack>
-      </RadioGroup>
+                </Flex>
+              </Radio>
+              <Radio value="weather">
+                <Flex align="center" gap={2}>
+                  <Icon as={FaSun} />
+                  <Box>
+                    <Text>Weather-Aware Route</Text>
+                    <Text fontSize="sm" color="gray.500">
+                      Considers current weather patterns and daylight hours
+                    </Text>
+                  </Box>
+                </Flex>
+              </Radio>
+            </Stack>
+          </RadioGroup>
+        </Box>
+
+        <Box p={3} bg={useColorModeValue('blue.50', 'blue.900')} borderRadius="md">
+          <VStack align="start" spacing={2}>
+            <Text fontWeight="medium">Route Constraints:</Text>
+            <Text fontSize="sm">• Maximum 8 hours driving per day</Text>
+            <Text fontSize="sm">• 30 minutes per site visit</Text>
+            <Text fontSize="sm">• Site visits between 7 AM - 7 PM only</Text>
+            <Text fontSize="sm">• Weather data used for planning and safety</Text>
+          </VStack>
+        </Box>
+
+        <Button
+          colorScheme="blue"
+          onClick={handleOptimize}
+          isDisabled={!selectedStartPoint || locations.length < 2}
+          size="lg"
+          isLoading={loading}
+        >
+          Generate Route
+        </Button>
+      </VStack>
     </Box>
   );
+};
+
+RouteOptions.propTypes = {
+  locations: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      address: PropTypes.string.isRequired,
+      coordinates: PropTypes.arrayOf(PropTypes.number).isRequired,
+    })
+  ).isRequired,
+  selectedStartPoint: PropTypes.string,
+  onStartPointChange: PropTypes.func.isRequired,
+  onOptimize: PropTypes.func.isRequired,
 };
 
 export default RouteOptions; 

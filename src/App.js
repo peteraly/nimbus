@@ -1,297 +1,249 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   ChakraProvider,
   Box,
-  Container,
   VStack,
-  Heading,
+  Grid,
+  theme,
   useColorModeValue,
-  IconButton,
-  useColorMode,
-  useToast,
-  HStack,
+  Container,
+  Heading,
   Text,
-  Badge,
-  Divider,
+  useToast,
 } from '@chakra-ui/react';
-import { SunIcon, MoonIcon } from '@chakra-ui/icons';
-import AddressInput from './components/AddressInput';
-import MapDisplay from './components/MapDisplay';
-import RouteSummary from './components/RouteSummary';
+import LocationSearch from './components/LocationSearch';
 import WeatherForecast from './components/WeatherForecast';
-import Settings from './pages/Settings';
-import { getOptimizedRoute } from './utils/routeUtils';
+import RouteSummary from './components/RouteSummary';
+import RouteMap from './components/RouteMap';
 import RouteOptions from './components/RouteOptions';
+import { getOptimizedRoutes } from './services/routeService';
 import { getWeatherData } from './services/weatherService';
 
-function App() {
+const App = () => {
   const [locations, setLocations] = useState([]);
-  const [startLocation, setStartLocation] = useState(null);
-  const [route, setRoute] = useState(null);
-  const [settings, setSettings] = useState({
-    display: {
-      showWeatherOverlay: true,
-    },
-  });
-  const [weatherData, setWeatherData] = useState({});
-  const [weatherAlerts, setWeatherAlerts] = useState([]);
-  const weatherDataRef = useRef(weatherData);
-  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
-
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [routes, setRoutes] = useState({ distanceOptimized: null, weatherOptimized: null });
+  const [loading, setLoading] = useState(false);
+  const [selectedStartPoint, setSelectedStartPoint] = useState('');
   const toast = useToast();
+
   const bgColor = useColorModeValue('gray.50', 'gray.900');
   const textColor = useColorModeValue('gray.800', 'white');
-  const { colorMode, toggleColorMode } = useColorMode();
 
-  // Keep weatherDataRef in sync with weatherData
-  useEffect(() => {
-    weatherDataRef.current = weatherData;
-  }, [weatherData]);
+  const optimizeRoute = useCallback(async (options) => {
+    if (!options.startPoint || locations.length < 2) {
+      setRoutes({ distanceOptimized: null, weatherOptimized: null });
+      return;
+    }
 
-  // Fetch weather data when locations or startLocation change
-  useEffect(() => {
-    const fetchWeatherData = async () => {
-      try {
-        // Create a map of existing weather data
-        const newWeatherData = { ...weatherData };
-        let hasUpdates = false;
+    try {
+      setLoading(true);
+      
+      // For MVP, we'll focus on current weather conditions and basic route optimization
+      const remainingLocations = locations.filter(loc => loc.id !== options.startPoint.id);
+      const startPoint = options.startPoint;
+      
+      // Check if any locations have severe weather warnings
+      const locationsWithWarnings = locations.filter(loc => {
+        const weather = loc.weather?.current;
+        if (!weather) return false;
+        
+        return (
+          weather.wind > 20 || // Wind speed > 20 mph
+          weather.precipitation > 0.1 || // Active precipitation
+          weather.visibility < 5000 // Poor visibility
+        );
+      });
 
-        // Fetch weather data for start location if it doesn't have it yet
-        if (startLocation && startLocation.address && !newWeatherData[startLocation.address]) {
-          console.log(`Fetching weather data for start location: ${startLocation.address}`);
-          const data = await getWeatherData(startLocation);
-          if (data) {
-            console.log(`Received weather data for start location: ${startLocation.address}`, data);
-            newWeatherData[startLocation.address] = data;
-            hasUpdates = true;
-          }
-        }
-
-        // Fetch weather data for each location that doesn't have it yet
-        for (const location of locations) {
-          if (!location.address || newWeatherData[location.address]) {
-            continue;
-          }
-
-          console.log(`Fetching weather data for: ${location.address}`);
-          const data = await getWeatherData(location);
-          if (data) {
-            console.log(`Received weather data for: ${location.address}`, data);
-            newWeatherData[location.address] = data;
-            hasUpdates = true;
-          }
-        }
-
-        // Only update state if we have new weather data
-        if (hasUpdates) {
-          console.log('Updating weather data state with new data');
-          setWeatherData(newWeatherData);
-        }
-      } catch (error) {
-        console.error('Error fetching weather data:', error);
+      if (locationsWithWarnings.length > 0) {
         toast({
-          title: 'Error fetching weather data',
-          description: error.message,
-          status: 'error',
+          title: 'Weather Advisory',
+          description: `${locationsWithWarnings.length} location(s) currently have weather conditions that may affect drone operations.`,
+          status: 'warning',
+          duration: 7000,
+          isClosable: true,
+        });
+      }
+
+      const routeOptions = await getOptimizedRoutes(remainingLocations, startPoint);
+      
+      if (routeOptions) {
+        setRoutes(routeOptions);
+        
+        const routeType = options.optimizationType === 'distance' ? 'distance-optimized' : 'weather-aware';
+        toast({
+          title: 'Route Generated',
+          description: `Created a ${routeType} route across ${routeOptions.distanceOptimized.numberOfDays} days.`,
+          status: 'success',
           duration: 5000,
           isClosable: true,
         });
       }
-    };
-
-    fetchWeatherData();
-  }, [locations, startLocation, toast, weatherData]);
-
-  // Add this new effect to handle route optimization
-  const optimizeRoute = useCallback(async () => {
-    if (locations.length < 1) return;
-    
-    try {
-      // Check if we have weather data for all locations
-      const allLocations = startLocation ? [startLocation, ...locations] : locations;
-      const hasAllWeatherData = allLocations.every(loc => weatherData[loc.address]);
+    } catch (error) {
+      console.error('Error optimizing routes:', error);
       
-      if (!hasAllWeatherData) {
-        console.log('Waiting for weather data...');
-        return;
+      // Show a more user-friendly error message
+      let errorMessage = error.message;
+      if (error.message.includes('too far apart')) {
+        errorMessage = 'Some locations are too far apart. Please select locations within reasonable driving distance.';
+      } else if (error.message.includes('inaccessible')) {
+        errorMessage = 'Some locations cannot be reached by road. Please ensure all locations are accessible.';
+      } else if (error.message.includes('weather data')) {
+        errorMessage = 'Unable to fetch weather data for some locations. Please try again.';
       }
       
-      console.log('Optimizing route with locations:', allLocations);
-      const optimizedRoute = await getOptimizedRoute(locations, weatherData, startLocation);
-      setRoute(optimizedRoute);
-    } catch (error) {
-      console.error('Error optimizing route:', error);
       toast({
-        title: 'Error optimizing route',
-        description: error.message,
+        title: 'Route Generation Failed',
+        description: errorMessage,
         status: 'error',
-        duration: 5000,
+        duration: 7000,
         isClosable: true,
       });
+      setRoutes({ distanceOptimized: null, weatherOptimized: null });
+    } finally {
+      setLoading(false);
     }
-  }, [locations, weatherData, startLocation, toast]);
+  }, [locations, toast]);
 
-  useEffect(() => {
-    optimizeRoute();
-  }, [optimizeRoute]);
+  const handleLocationAdd = useCallback(async (locationData) => {
+    try {
+      // Check for duplicate locations
+      const isDuplicate = locations.some(
+        loc => loc.address === locationData.address
+      );
 
-  // Memoize locationsWithWeather to prevent unnecessary recalculations
-  const locationsWithWeather = React.useMemo(() => {
-    const allLocations = startLocation 
-      ? [startLocation, ...locations]
-      : locations;
-    
-    return allLocations.map(location => ({
-      ...location,
-      weather: location && location.address ? weatherData[location.address]?.current : undefined,
-      forecast: location && location.address ? weatherData[location.address]?.forecast : undefined
-    }));
-  }, [locations, startLocation, weatherData]);
+      if (isDuplicate) {
+        toast({
+          title: 'Duplicate location',
+          description: 'This location has already been added to your route.',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
 
-  const handleLocationAdd = (location) => {
-    // Check if location already exists
-    const isDuplicate = locations.some(
-      loc => loc.address === location.address
-    );
-    
-    // Check if location is the same as start location
-    const isStartLocation = startLocation && startLocation.address === location.address;
-    
-    if (isDuplicate || isStartLocation) {
+      setLoading(true);
+      const locationWithId = {
+        ...locationData,
+        id: `loc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      };
+      
+      const weatherData = await getWeatherData(locationWithId);
+      const newLocation = {
+        ...locationWithId,
+        weather: weatherData,
+      };
+      
+      setLocations(prev => [...prev, newLocation]);
+      
+      // If this is the first location, select it as the starting point
+      if (locations.length === 0) {
+        setSelectedStartPoint(newLocation.id);
+      }
+      
+      // If this is the first location, or no location is selected, select it
+      if (locations.length === 0 || !selectedLocation) {
+        setSelectedLocation(newLocation);
+      }
+      
       toast({
-        title: 'Location already added',
-        description: 'This location is already in your route.',
-        status: 'warning',
+        title: 'Location added',
+        description: `${locationData.address} has been added to your route.`,
+        status: 'success',
         duration: 3000,
         isClosable: true,
       });
-      return;
-    }
-    
-    setLocations(prev => [...prev, location]);
-  };
-
-  const handleStartLocationAdd = (location) => {
-    setStartLocation(location);
-  };
-
-  const handleLocationRemove = (index) => {
-    if (index === null) {
-      // Clear all locations
-      setLocations([]);
-      setStartLocation(null);
-      setWeatherData({});
-      setWeatherAlerts([]);
-      setRoute(null);
-    } else {
-      // Remove single location
-      setLocations(prev => {
-        const newLocations = prev.filter((_, i) => i !== index);
-        if (newLocations.length === 0) {
-          setRoute(null);
-        }
-        return newLocations;
+    } catch (error) {
+      console.error('Error adding location:', error);
+      toast({
+        title: 'Error adding location',
+        description: error.message || 'Failed to add location',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
       });
-
-      // Remove weather data for the removed location
-      setWeatherData(prev => {
-        const newData = { ...prev };
-        const removedLocation = locations[index];
-        if (removedLocation && removedLocation.address) {
-          delete newData[removedLocation.address];
-        }
-        return newData;
-      });
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [locations, selectedLocation, toast]);
 
-  const handleStartLocationRemove = () => {
-    setStartLocation(null);
-  };
+  const handleLocationRemove = useCallback((locationId) => {
+    setLocations(prev => {
+      const newLocations = prev.filter(loc => loc.id !== locationId);
+      
+      // If we removed the selected location, select the first available location
+      if (selectedLocation && locationId === selectedLocation.id) {
+        setSelectedLocation(newLocations[0] || null);
+      }
 
-  const handleSettingsUpdate = (newSettings) => {
-    setSettings(newSettings);
-  };
+      // If we removed the start point, select the first available location as start
+      if (selectedStartPoint === locationId) {
+        setSelectedStartPoint(newLocations[0]?.id || '');
+      }
 
-  const handleRouteUpdate = (newRoute) => {
-    setRoute(newRoute);
-  };
+      // If we have less than 2 locations, clear the routes
+      if (newLocations.length < 2) {
+        setRoutes({ distanceOptimized: null, weatherOptimized: null });
+      }
+
+      return newLocations;
+    });
+  }, [selectedLocation, selectedStartPoint]);
 
   return (
-    <ChakraProvider>
+    <ChakraProvider theme={theme}>
       <Box minH="100vh" bg={bgColor} color={textColor}>
         <Container maxW="container.xl" py={8}>
           <VStack spacing={8} align="stretch">
-            <Box display="flex" alignItems="center" justifyContent="space-between">
-              <Heading as="h1" size="2xl">
+            <Box textAlign="center">
+              <Heading as="h1" size="xl" mb={2}>
                 Drone Weather Route Planner
               </Heading>
-              <IconButton
-                icon={colorMode === 'light' ? <MoonIcon /> : <SunIcon />}
-                onClick={toggleColorMode}
-                aria-label="Toggle color mode"
-              />
-            </Box>
-            
-            <Box>
-              <Text fontWeight="bold" mb={2}>Starting Point</Text>
-              <AddressInput
-                onLocationAdd={handleStartLocationAdd}
-                onLocationRemove={handleStartLocationRemove}
-                locations={startLocation ? [startLocation] : []}
-                placeholder="Enter starting point address..."
-              />
-              {startLocation && (
-                <HStack mt={2} spacing={2}>
-                  <Badge colorScheme="green">Start</Badge>
-                  <Text fontSize="sm">{startLocation.address}</Text>
-                </HStack>
-              )}
-            </Box>
-            
-            <Divider />
-            
-            <Box>
-              <Text fontWeight="bold" mb={2}>Destination Points</Text>
-              <AddressInput
-                onLocationAdd={handleLocationAdd}
-                onLocationRemove={handleLocationRemove}
-                locations={locations}
-                placeholder="Enter destination address..."
-              />
+              <Text fontSize="lg" color={useColorModeValue('gray.600', 'gray.400')}>
+                Plan your drone routes with weather-aware optimization
+              </Text>
             </Box>
 
-            <MapDisplay
-              locations={locations}
-              startLocation={startLocation}
-              route={route}
-              settings={settings}
-              onRouteUpdate={handleRouteUpdate}
-            />
+            <Grid templateColumns={{ base: '1fr', lg: 'repeat(2, 1fr)' }} gap={8}>
+              <VStack spacing={6} align="stretch">
+                <LocationSearch
+                  onLocationAdd={handleLocationAdd}
+                  onLocationRemove={handleLocationRemove}
+                  locations={locations}
+                  loading={loading}
+                />
+                <WeatherForecast
+                  locations={locations}
+                  selectedLocation={selectedLocation}
+                  onLocationChange={setSelectedLocation}
+                />
+                <RouteOptions
+                  locations={locations}
+                  selectedStartPoint={selectedStartPoint}
+                  onStartPointChange={setSelectedStartPoint}
+                  onOptimize={optimizeRoute}
+                />
+              </VStack>
 
-            <RouteOptions
-              route={route}
-              onSelectRoute={setSelectedRouteIndex}
-              selectedRouteIndex={selectedRouteIndex}
-            />
-
-            <RouteSummary
-              route={route}
-              locations={locations}
-              startLocation={startLocation}
-            />
-
-            <WeatherForecast
-              locations={locationsWithWeather}
-              alerts={weatherAlerts}
-            />
-
-            <Settings onSettingsUpdate={handleSettingsUpdate} />
+              <VStack spacing={6} align="stretch">
+                <RouteMap
+                  locations={locations}
+                  routes={routes}
+                  selectedLocation={selectedLocation}
+                  onLocationSelect={setSelectedLocation}
+                />
+                <RouteSummary
+                  routes={routes}
+                  loading={loading}
+                />
+              </VStack>
+            </Grid>
           </VStack>
         </Container>
       </Box>
     </ChakraProvider>
   );
-}
+};
 
 export default App; 

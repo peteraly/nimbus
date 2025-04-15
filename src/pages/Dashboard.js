@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Container,
@@ -34,6 +34,9 @@ function Dashboard() {
   const [settings, setSettings] = useState(loadSettings());
   const toast = useToast();
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+  const [dailyTimeLimit, setDailyTimeLimit] = useState('');
+  const [routes, setRoutes] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Calculate route when locations change
   useEffect(() => {
@@ -51,9 +54,15 @@ function Dashboard() {
         setIsCalculating(true);
         // Use the first added location as start if none specified
         const start = startLocation || locations[0];
-        const optimizedRoute = await getOptimizedRoute(locations, start);
+        const optimizedRoute = await getOptimizedRoute(locations, parseInt(dailyTimeLimit, 10));
         
         if (optimizedRoute) {
+          setRoutes([{
+            ...optimizedRoute,
+            totalDistance: optimizedRoute.totalDistance,
+            totalDuration: optimizedRoute.totalDuration,
+            numberOfDays: optimizedRoute.numberOfDays
+          }]);
           setRouteOptions([optimizedRoute]);
           setRoute(optimizedRoute);
           setRouteStats({
@@ -61,26 +70,44 @@ function Dashboard() {
             safeStops: optimizedRoute.weatherScores.filter(s => s.score > 70).length,
             moderateStops: optimizedRoute.weatherScores.filter(s => s.score > 40 && s.score <= 70).length,
             unsafeStops: optimizedRoute.weatherScores.filter(s => s.score <= 40).length,
-            totalDistance: optimizedRoute.distance,
-            totalDuration: optimizedRoute.duration,
+            totalDistance: optimizedRoute.totalDistance,
+            totalDuration: optimizedRoute.totalDuration,
             safetyPercentage: optimizedRoute.safetyPercentage
+          });
+          
+          toast({
+            title: 'Route optimized',
+            description: `Route optimized into ${optimizedRoute.numberOfDays} day(s) based on your preferences.`,
+            status: 'success',
+            duration: 3000,
+            isClosable: true,
           });
         }
       } catch (error) {
+        console.error('Error optimizing route:', error);
+        
+        let errorMessage = error.message;
+        if (error.message.includes('too far apart')) {
+          errorMessage = 'Some locations are too far apart to create a continuous route. Please select locations that are within driving distance of each other.';
+        } else if (error.message.includes('inaccessible')) {
+          errorMessage = 'Some locations cannot be reached by road. Please ensure all locations are accessible by road.';
+        }
+        
         toast({
-          title: 'Error',
-          description: 'Failed to calculate route. Please try again.',
+          title: 'Error optimizing route',
+          description: errorMessage,
           status: 'error',
-          duration: 5000,
+          duration: 7000,
           isClosable: true,
         });
+        setRoutes([]);
       } finally {
         setIsCalculating(false);
       }
     };
 
     calculateRouteIfNeeded();
-  }, [locations, isCalculating, startLocation, toast]);
+  }, [locations, isCalculating, startLocation, dailyTimeLimit, toast]);
 
   const handleLocationAdd = (location) => {
     // If this is the first location, set it as the start location
@@ -117,12 +144,67 @@ function Dashboard() {
         safeStops: selectedRoute.weatherScores.filter(s => s.score > 70).length,
         moderateStops: selectedRoute.weatherScores.filter(s => s.score > 40 && s.score <= 70).length,
         unsafeStops: selectedRoute.weatherScores.filter(s => s.score <= 40).length,
-        totalDistance: selectedRoute.distance,
-        totalDuration: selectedRoute.duration,
+        totalDistance: selectedRoute.totalDistance,
+        totalDuration: selectedRoute.totalDuration,
         safetyPercentage: selectedRoute.safetyPercentage
       });
     }
   };
+
+  const handleOptimizeRoute = useCallback(async () => {
+    if (locations.length < 2) {
+      toast({
+        title: 'Not enough locations',
+        description: 'Please add at least two locations to optimize a route.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const routeData = await getOptimizedRoute(locations, parseInt(dailyTimeLimit, 10));
+      
+      if (routeData) {
+        setRoutes([{
+          ...routeData,
+          totalDistance: routeData.totalDistance,
+          totalDuration: routeData.totalDuration,
+          numberOfDays: routeData.numberOfDays
+        }]);
+        
+        toast({
+          title: 'Route optimized',
+          description: `Route optimized into ${routeData.numberOfDays} day(s) based on your preferences.`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+      }
+    } catch (error) {
+      console.error('Error optimizing route:', error);
+      
+      let errorMessage = error.message;
+      if (error.message.includes('too far apart')) {
+        errorMessage = 'Some locations are too far apart to create a continuous route. Please select locations that are within driving distance of each other.';
+      } else if (error.message.includes('inaccessible')) {
+        errorMessage = 'Some locations cannot be reached by road. Please ensure all locations are accessible by road.';
+      }
+      
+      toast({
+        title: 'Error optimizing route',
+        description: errorMessage,
+        status: 'error',
+        duration: 7000,
+        isClosable: true,
+      });
+      setRoutes([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [locations, dailyTimeLimit, toast]);
 
   return (
     <Container maxW="container.xl" py={8}>
