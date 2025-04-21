@@ -117,17 +117,16 @@ const logError = (...args) => {
  * @returns {boolean} Whether the coordinate is valid
  */
 function isValidCoordinate(value, type) {
-  if (typeof value !== 'number' || isNaN(value)) {
-    return false;
-  }
+  if (typeof value !== 'number' || isNaN(value)) return false;
 
-  if (type === 'latitude') {
-    return value >= -90 && value <= 90;
-  } else if (type === 'longitude') {
-    return value >= -180 && value <= 180;
+  switch (type) {
+    case 'latitude':
+      return value >= -90 && value <= 90;
+    case 'longitude':
+      return value >= -180 && value <= 180;
+    default:
+      return false;
   }
-
-  return false;
 }
 
 /**
@@ -136,13 +135,11 @@ function isValidCoordinate(value, type) {
  * @returns {boolean} Whether the location has valid coordinates
  */
 function hasValidCoordinates(location) {
-  if (!location || typeof location !== 'object') {
-    return false;
-  }
+  if (!location) return false;
 
-  // Check for lat/lng or latitude/longitude properties
-  const lat = location.lat ?? location.latitude;
-  const lng = location.lng ?? location.longitude;
+  // Try both lat/lng and latitude/longitude formats
+  const lat = Number(location.lat ?? location.latitude);
+  const lng = Number(location.lng ?? location.longitude);
 
   return isValidCoordinate(lat, 'latitude') && isValidCoordinate(lng, 'longitude');
 }
@@ -157,26 +154,21 @@ function formatCoordinatesForMapbox(locations) {
     throw new Error('Locations must be an array');
   }
 
-  const validLocations = locations.filter(location => {
+  return locations.map(location => {
     if (!hasValidCoordinates(location)) {
-      const address = location.address || 'Unknown address';
-      logError(`Invalid coordinates for location: ${address}`);
-      return false;
+      throw new Error(`Invalid coordinates for location: ${location?.name || 'Unknown'}`);
     }
-    return true;
+
+    const lat = Number(location.lat ?? location.latitude);
+    const lng = Number(location.lng ?? location.longitude);
+
+    return {
+      ...location,
+      coordinates: [lng, lat], // Mapbox expects [longitude, latitude]
+      lat,
+      lng,
+    };
   });
-
-  if (validLocations.length < 2) {
-    throw new Error('At least 2 valid locations are required for route optimization');
-  }
-
-  return validLocations
-    .map(location => {
-      const lng = location.lng ?? location.longitude;
-      const lat = location.lat ?? location.latitude;
-      return `${lng.toFixed(6)},${lat.toFixed(6)}`;
-    })
-    .join(';');
 }
 
 /**
@@ -568,6 +560,88 @@ async function calculateDistanceOptimalRoute(locations, startingPoint) {
   }
 }
 
+async function generateWeatherOptimizedSequence(locations, startPoint) {
+  if (!Array.isArray(locations) || locations.length === 0) {
+    throw new Error('At least one valid location is required for sequence generation');
+  }
+
+  // Initialize sequence with start point
+  const sequence = [startPoint];
+  const remaining = locations.filter(
+    loc =>
+      loc.coordinates[0] !== startPoint.coordinates[0] ||
+      loc.coordinates[1] !== startPoint.coordinates[1]
+  );
+
+  while (remaining.length > 0) {
+    const current = sequence[sequence.length - 1];
+    let best = null;
+    let bestScore = -Infinity;
+
+    for (const location of remaining) {
+      // Calculate distance score
+      const distance = calculateDistance(
+        current.coordinates[1],
+        current.coordinates[0],
+        location.coordinates[1],
+        location.coordinates[0]
+      );
+      const distanceScore = 100 * (1 - distance / MAX_DAILY_DISTANCE);
+
+      // Calculate weather score
+      let weatherScore = null;
+      if (location.weather?.current) {
+        const { score, details, isSafe, warnings } = calculateWeatherScore({
+          current: location.weather.current,
+        });
+
+        weatherScore = {
+          score: score || 50,
+          conditions: {
+            temp: Math.round(location.weather.current.temperature || 0),
+            wind_speed: Number((location.weather.current.wind || 0).toFixed(1)),
+            precipitation: Number((location.weather.current.precipitation || 0).toFixed(2)),
+            visibility: Math.round((location.weather.current.visibility || 0) / 1000),
+          },
+          isSafe,
+          warnings,
+        };
+      }
+
+      // Calculate combined score
+      const combinedScore = weatherScore
+        ? distanceScore * 0.4 + weatherScore.score * 0.6
+        : distanceScore;
+
+      if (combinedScore > bestScore) {
+        bestScore = combinedScore;
+        best = {
+          ...location,
+          weatherScore,
+          distance,
+          combinedScore,
+        };
+      }
+    }
+
+    if (!best) {
+      throw new Error('Failed to find next location in sequence');
+    }
+
+    // Add best location to sequence
+    sequence.push(best);
+
+    // Remove from remaining locations
+    const index = remaining.findIndex(
+      loc =>
+        loc.coordinates[0] === best.coordinates[0] && loc.coordinates[1] === best.coordinates[1]
+    );
+    remaining.splice(index, 1);
+  }
+
+  return sequence;
+}
+
 async function calculateWeatherOptimalRoute(locations, startingPoint) {
   if (!locations?.length || !startingPoint) {
     throw new Error('Valid locations and starting point required');
@@ -801,7 +875,7 @@ async function findRestStops(origin, destination, departureTime) {
   try {
     // Calculate the direct route first
     const directRoute = await getRouteDataWithRetry([origin, destination]);
-    const totalDuration = directRoute.route.duration;
+    const totalDuration = directRoute.duration;
 
     // If the total duration is within daily limit, no rest stops needed
     if (totalDuration <= MAX_DAILY_DRIVE_SECONDS) {
@@ -813,7 +887,7 @@ async function findRestStops(origin, destination, departureTime) {
     const restStops = [];
 
     // Get cities along the route
-    const coordinates = directRoute.route.geometry.coordinates;
+    const coordinates = directRoute.geometry.coordinates;
     const potentialStops = [];
 
     // Sample points along the route where we might need rest stops
@@ -907,7 +981,7 @@ async function splitIntoDaily(routeData, locations) {
       const { restStops } = await findRestStops(origin, destination, currentTime);
 
       // Check if adding this leg would exceed daily limit
-      if (currentSegment.duration + segmentRoute.route.duration > MAX_DAILY_DRIVE_SECONDS) {
+      if (currentSegment.duration + segmentRoute.duration > MAX_DAILY_DRIVE_SECONDS) {
         // Finalize current segment
         currentSegment.endTime = new Date(currentTime.getTime());
         segments.push(currentSegment);
@@ -937,8 +1011,8 @@ async function splitIntoDaily(routeData, locations) {
       // Add location and update segment data
       currentSegment.locations.push(origin);
       currentSegment.restStops.push(...restStops);
-      currentSegment.duration += segmentRoute.route.duration;
-      currentSegment.distance += segmentRoute.route.distance;
+      currentSegment.duration += segmentRoute.duration;
+      currentSegment.distance += segmentRoute.distance;
 
       // Update weather summary if location has weather data
       if (origin.weatherScore) {
@@ -971,221 +1045,145 @@ async function splitIntoDaily(routeData, locations) {
       for (const stop of restStops) {
         currentTime = new Date(stop.departureTime);
       }
-      currentTime = new Date(currentTime.getTime() + segmentRoute.route.duration * 1000);
+      currentTime = new Date(currentTime.getTime() + segmentRoute.duration * 1000);
     } catch (error) {
       logError(`Error processing segment from ${origin.address} to ${destination.address}:`, error);
       throw new Error(`Failed to process route segment: ${error.message}`);
     }
   }
 
-  // Add final location to last segment
-  currentSegment.locations.push(locations[locations.length - 1]);
-
-  // Update weather summary with final location if it has weather data
-  const finalLocation = locations[locations.length - 1];
-  if (finalLocation.weatherScore?.conditions) {
-    const conditions = finalLocation.weatherScore.conditions;
-    const count = currentSegment.locations.length;
-    currentSegment.weatherSummary = {
-      temperature:
-        (currentSegment.weatherSummary.temperature * (count - 1) + conditions.temp) / count,
-      wind_speed:
-        (currentSegment.weatherSummary.wind_speed * (count - 1) + conditions.wind_speed) / count,
-      precipitation:
-        (currentSegment.weatherSummary.precipitation * (count - 1) + conditions.precipitation) /
-        count,
-      visibility:
-        (currentSegment.weatherSummary.visibility * (count - 1) + conditions.visibility) / count,
-      status: finalLocation.weatherScore.isSafe ? 'safe' : 'warning',
-    };
-    if (finalLocation.weatherScore.warnings && finalLocation.weatherScore.warnings.length > 0) {
-      currentSegment.weatherWarnings.push(...finalLocation.weatherScore.warnings);
-    }
+  // Add the last location and finalize the last segment
+  if (locations.length > 0) {
+    const lastLocation = locations[locations.length - 1];
+    currentSegment.locations.push(lastLocation);
+    currentSegment.endTime = new Date(currentTime.getTime());
+    segments.push(currentSegment);
   }
 
-  currentSegment.endTime = new Date(currentTime.getTime());
-  segments.push(currentSegment);
-
-  return segments;
+  return {
+    segments,
+    summary: {
+      totalDistance: segments.reduce((sum, segment) => sum + segment.distance, 0),
+      totalDuration: segments.reduce((sum, segment) => sum + segment.duration, 0),
+      numberOfDays: segments.length,
+      totalLocations: locations.length,
+    },
+  };
 }
 
 /**
  * Get optimized routes with rest stops and daily segments
  */
-async function getOptimizedRoutes(locations) {
-  if (!locations || locations.length < 2) {
-    throw new Error('At least 2 locations are required for route optimization');
+async function getOptimizedRoutes(locations, startingPoint = null) {
+  if (!Array.isArray(locations) || locations.length < 2) {
+    throw new Error('At least 2 valid locations are required for route optimization');
   }
 
   try {
-    // Track included locations
-    const includedLocations = new Set();
-    const missingLocations = [];
+    // Format and validate all locations
+    const formattedLocations = formatCoordinatesForMapbox(locations);
+    const startPoint = startingPoint
+      ? validateAndFormatCoordinates(startingPoint)
+      : formattedLocations[0];
 
-    // Validate and format all locations upfront
-    const validLocations = locations
-      .map(location => {
-        try {
-          const [lng, lat] = validateAndFormatCoordinates(location);
-          includedLocations.add(location.id);
-          return {
-            ...location,
-            coordinates: [lng, lat],
-          };
-        } catch (error) {
-          logError(`Invalid location skipped: ${location.address}`, error);
-          missingLocations.push(location.address);
-          return null;
-        }
-      })
-      .filter(Boolean);
-
-    if (validLocations.length < 2) {
-      throw new Error('Not enough valid locations for route optimization');
+    // Generate the weather-optimized sequence
+    const weatherOptimizedSequence = await generateWeatherOptimizedSequence(
+      formattedLocations,
+      startPoint
+    );
+    if (!weatherOptimizedSequence || weatherOptimizedSequence.length === 0) {
+      throw new Error('Failed to generate weather-optimized sequence');
     }
 
-    // Find starting point (first location in the list)
-    const startingPoint = validLocations[0];
-    const unvisited = validLocations.slice(1);
-    const optimizedSequence = [startingPoint];
-
-    // Build route using nearest neighbor algorithm
-    while (unvisited.length > 0) {
-      const currentLocation = optimizedSequence[optimizedSequence.length - 1];
-      const currentCoords = validateAndFormatCoordinates(currentLocation);
-
-      // Find nearest unvisited location
-      let nearestLocation = null;
-      let shortestDistance = Infinity;
-
-      for (const location of unvisited) {
-        const coords = validateAndFormatCoordinates(location);
-        const distance = calculateDistance(
-          currentCoords[1],
-          currentCoords[0],
-          coords[1],
-          coords[0]
-        );
-
-        if (distance < shortestDistance) {
-          shortestDistance = distance;
-          nearestLocation = location;
-        }
-      }
-
-      // Add nearest location to sequence
-      optimizedSequence.push(nearestLocation);
-
-      // Remove from unvisited
-      const index = unvisited.findIndex(loc => loc.address === nearestLocation.address);
-      unvisited.splice(index, 1);
+    // Get route data from Mapbox
+    const routeData = await getRouteDataWithRetry(weatherOptimizedSequence);
+    if (!routeData) {
+      throw new Error('Failed to get route data from Mapbox');
     }
 
-    // Split into daily segments with rest stops
-    const dailySegments = await splitIntoDaily(null, optimizedSequence);
-
-    // Create summary
-    const summary = {
-      totalLocations: validLocations.length,
-      includedLocations: Array.from(includedLocations),
-      missingLocations,
-      numberOfDays: dailySegments.length,
-      totalDistance: dailySegments.reduce((sum, segment) => sum + segment.distance, 0),
-      totalDuration: dailySegments.reduce((sum, segment) => sum + segment.duration, 0),
-    };
+    // Split into daily segments
+    const dailySegments = await splitIntoDaily(routeData, weatherOptimizedSequence);
 
     return {
-      segments: dailySegments,
-      summary,
-      error:
-        missingLocations.length > 0
-          ? `Some locations could not be included: ${missingLocations.join(', ')}`
-          : null,
+      ...routeData,
+      segments: dailySegments.segments,
+      summary: dailySegments.summary,
     };
   } catch (error) {
-    logError('Route optimization failed:', error);
-    throw new Error(`Failed to optimize route: ${error.message}`);
+    console.error('Route optimization failed:', error);
+    throw error;
   }
 }
 
-async function getRouteDataWithRetry(locations, maxRetries = 3) {
-  let lastError = null;
+async function getRouteDataWithRetry(locations, maxRetries = 3, retryCount = 1) {
+  const lastError = null;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      logDebug(`Retrying route calculation (attempt ${attempt}/${maxRetries})...`);
+  try {
+    logDebug(`Retrying route calculation (attempt ${retryCount}/${maxRetries})...`);
 
-      // Validate locations
-      if (!Array.isArray(locations) || locations.length < 2) {
-        throw new Error('At least two valid locations are required for route calculation');
-      }
-
-      // Validate each location
-      locations.forEach((location, index) => {
-        logDebug('Validating location:', location);
-        if (!location || typeof location.lng !== 'number' || typeof location.lat !== 'number') {
-          throw new Error(
-            `Invalid coordinates for location ${index + 1}: ${location?.address || 'Unknown location'}`
-          );
-        }
-      });
-
-      // Format coordinates string - Mapbox expects format: lng,lat;lng,lat
-      const coordinates = locations
-        .map(loc => `${loc.lng.toFixed(6)},${loc.lat.toFixed(6)}`)
-        .join(';');
-
-      // Build the Mapbox Directions API URL with minimal required parameters
-      const baseUrl = 'https://api.mapbox.com/directions/v5/mapbox/driving/';
-      const params = new URLSearchParams({
-        access_token: MAPBOX_ACCESS_TOKEN,
-        geometries: 'geojson',
-        overview: 'full',
-        steps: 'true',
-        annotations: 'distance,duration',
-      });
-
-      const response = await fetch(`${baseUrl}${coordinates}?${params}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(`Mapbox API error: ${data.message || response.statusText}`);
-      }
-
-      if (!data.routes || data.routes.length === 0) {
-        throw new Error('No routes found between the specified locations');
-      }
-
-      return {
-        route: {
-          geometry: data.routes[0].geometry,
-          distance: data.routes[0].distance,
-          duration: data.routes[0].duration,
-          legs: data.routes[0].legs,
-        },
-        waypoints: data.waypoints,
-        summary: {
-          totalLocations: locations.length,
-          includedLocations: locations.length,
-          totalDistance: data.routes[0].distance,
-          totalDuration: data.routes[0].duration,
-          numberOfDays: 1,
-        },
-      };
-    } catch (error) {
-      lastError = error;
-      logDebug(`Attempt ${attempt} failed:`, error.message);
-
-      if (attempt === maxRetries) {
-        throw new Error(`Failed to get route after ${maxRetries} attempts: ${error.message}`);
-      }
-
-      // Wait before retrying with exponential backoff
-      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+    // Validate locations
+    if (!Array.isArray(locations) || locations.length < 2) {
+      throw new Error('At least two valid locations are required for route calculation');
     }
-  }
 
-  throw lastError;
+    // Validate each location
+    locations.forEach((location, index) => {
+      logDebug('Validating location:', location);
+      if (!location || typeof location.lng !== 'number' || typeof location.lat !== 'number') {
+        throw new Error(
+          `Invalid coordinates for location ${index + 1}: ${location?.address || 'Unknown location'}`
+        );
+      }
+    });
+
+    // Format coordinates string - Mapbox expects format: lng,lat;lng,lat
+    const coordinates = locations
+      .map(loc => `${loc.lng.toFixed(6)},${loc.lat.toFixed(6)}`)
+      .join(';');
+
+    // Build the Mapbox Directions API URL with minimal required parameters
+    const baseUrl = 'https://api.mapbox.com/directions/v5/mapbox/driving/';
+    const params = new URLSearchParams({
+      access_token: MAPBOX_ACCESS_TOKEN,
+      geometries: 'geojson',
+      overview: 'full',
+      steps: 'true',
+      annotations: 'distance,duration',
+    });
+
+    const response = await fetch(`${baseUrl}${coordinates}?${params}`);
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(`Mapbox API error: ${data.message || response.statusText}`);
+    }
+
+    if (!data.routes || data.routes.length === 0) {
+      throw new Error('No routes found between the specified locations');
+    }
+
+    // Return route details
+    const route = data.routes[0];
+    return {
+      geometry: route.geometry,
+      distance: route.distance,
+      duration: route.duration,
+      summary: {
+        totalDistance: route.distance,
+        totalDuration: route.duration,
+        numberOfDays: Math.ceil(route.duration / (8 * 3600)), // Assuming 8 hours per day
+        totalLocations: locations.length,
+      },
+    };
+  } catch (error) {
+    if (retryCount < maxRetries) {
+      // Exponential backoff
+      const delay = Math.pow(2, retryCount) * 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return getRouteDataWithRetry(locations, maxRetries, retryCount + 1);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1255,37 +1253,25 @@ async function getWeatherForecast(lat, lon) {
  */
 function validateAndFormatCoordinates(location) {
   if (!location) {
-    throw new Error('Location is required');
+    throw new Error('Location object is required');
   }
 
-  // Try different coordinate formats
-  let lng, lat;
+  const lat = Number(location.lat ?? location.latitude);
+  const lng = Number(location.lng ?? location.longitude);
 
-  // Check for lat/lng format
-  if (typeof location.lng !== 'undefined' && typeof location.lat !== 'undefined') {
-    lng = location.lng;
-    lat = location.lat;
+  if (!isValidCoordinate(lat, 'latitude')) {
+    throw new Error(`Invalid latitude: ${lat}`);
   }
-  // Check for latitude/longitude format
-  else if (typeof location.longitude !== 'undefined' && typeof location.latitude !== 'undefined') {
-    lng = location.longitude;
-    lat = location.latitude;
-  }
-  // Check for coordinates array format
-  else if (Array.isArray(location.coordinates) && location.coordinates.length === 2) {
-    [lng, lat] = location.coordinates;
-  } else {
-    throw new Error(`Invalid coordinates for location: ${location.address || 'Unknown location'}`);
+  if (!isValidCoordinate(lng, 'longitude')) {
+    throw new Error(`Invalid longitude: ${lng}`);
   }
 
-  // Validate coordinate values
-  if (!isValidCoordinate(lng, 'longitude') || !isValidCoordinate(lat, 'latitude')) {
-    throw new Error(
-      `Invalid coordinate values for location: ${location.address || 'Unknown location'}`
-    );
-  }
-
-  return [lng, lat];
+  return {
+    ...location,
+    coordinates: [lng, lat],
+    lat,
+    lng,
+  };
 }
 
 export { getOptimizedRoutes, calculateDistance, MIN_REST_DURATION_MINUTES };
