@@ -1,17 +1,9 @@
 import { MAPBOX_ACCESS_TOKEN } from '../config/apiKeys';
 
-const MAX_DISTANCE_KM = 3000; // Increased maximum distance between consecutive points
+const MAX_DISTANCE_KM = 3000;
 
-/**
- * Calculate the distance between two points using the Haversine formula
- * @param {number} lat1 - Latitude of first point
- * @param {number} lon1 - Longitude of first point
- * @param {number} lat2 - Latitude of second point
- * @param {number} lon2 - Longitude of second point
- * @returns {number} Distance in kilometers
- */
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Earth's radius in kilometers
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = 
@@ -22,86 +14,64 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-/**
- * Gets a route between multiple points using Mapbox Directions API
- * @param {string} coordinates - Semicolon-separated coordinates "lng,lat;lng,lat;..."
- * @returns {Promise<Object>} - Route data from Mapbox
- */
 const getRoute = async (coordinates) => {
-  if (!coordinates) {
-    throw new Error('No coordinates provided');
+  if (!coordinates) throw new Error('No coordinates provided');
+  if (!MAPBOX_ACCESS_TOKEN) throw new Error('Mapbox access token is missing');
+
+  const response = await fetch(
+    `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      throw new Error('Invalid Mapbox access token');
+    } else if (response.status === 422) {
+      throw new Error('Unable to create route between these locations. Try adding intermediate stops.');
+    }
+    throw new Error(errorData.message || `Failed to fetch route: ${response.statusText}`);
   }
 
-  if (!MAPBOX_ACCESS_TOKEN) {
-    throw new Error('Mapbox access token is missing');
-  }
-
-  // Validate distances between consecutive points
-  const coordPairs = coordinates.split(';').map(coord => coord.split(',').map(Number));
+  const data = await response.json();
+  if (!data.routes?.length) throw new Error('No routes found between the specified locations');
   
-  for (let i = 0; i < coordPairs.length - 1; i++) {
-    const [lon1, lat1] = coordPairs[i];
-    const [lon2, lat2] = coordPairs[i + 1];
-    const distance = calculateDistance(lat1, lon1, lat2, lon2);
-    
-    if (distance > MAX_DISTANCE_KM) {
-      throw new Error(
-        `The distance between points ${i + 1} and ${i + 2} is ${Math.round(distance)}km, ` +
-        `which exceeds the maximum allowed distance of ${MAX_DISTANCE_KM}km. ` +
-        `Consider adding intermediate stops between these locations.`
-      );
-    }
-  }
-
-  try {
-    const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?` +
-      `geometries=geojson&` +
-      `overview=full&` +
-      `access_token=${MAPBOX_ACCESS_TOKEN}`
-    );
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      if (response.status === 401) {
-        throw new Error('Invalid Mapbox access token');
-      } else if (response.status === 422) {
-        throw new Error(
-          'Unable to create route between these locations. ' +
-          'The distance may be too great or the locations may be inaccessible by road. ' +
-          'Try adding intermediate stops or checking if all locations are accessible by car.'
-        );
-      }
-      throw new Error(errorData.message || `Failed to fetch route from Mapbox: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    if (!data.routes || !Array.isArray(data.routes) || data.routes.length === 0) {
-      throw new Error('No routes found between the specified locations. Try adjusting your route or adding intermediate stops.');
-    }
-
-    const route = data.routes[0];
-    if (!route.geometry || !route.geometry.coordinates || !Array.isArray(route.geometry.coordinates)) {
-      throw new Error('Invalid route geometry in Mapbox response');
-    }
-
-    if (typeof route.distance !== 'number' || typeof route.duration !== 'number') {
-      throw new Error('Invalid route metrics in Mapbox response');
-    }
-
-    return {
-      routes: [{
-        geometry: route.geometry,
-        distance: route.distance,
-        duration: route.duration,
-        legs: route.legs || []
-      }]
-    };
-  } catch (error) {
-    console.error('Error fetching route from Mapbox:', error);
-    throw error instanceof Error ? error : new Error('Failed to process route data');
-  }
+  const route = data.routes[0];
+  return {
+    routes: [{
+      geometry: route.geometry,
+      distance: route.distance,
+      duration: route.duration,
+      legs: route.legs || []
+    }]
+  };
 };
 
-export { getRoute, calculateDistance, MAX_DISTANCE_KM }; 
+const geocodeAddress = async (address) => {
+  if (!address) throw new Error('Address is required');
+  
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${MAPBOX_ACCESS_TOKEN}&limit=1`;
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    throw new Error(`Geocoding failed: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  if (!data.features?.length) {
+    throw new Error(`No results found for address: ${address}`);
+  }
+  
+  return {
+    coordinates: data.features[0].center,
+    place_name: data.features[0].place_name
+  };
+};
+
+const mapboxService = {
+  getRoute,
+  calculateDistance,
+  MAX_DISTANCE_KM,
+  geocodeAddress
+};
+
+export default mapboxService; 

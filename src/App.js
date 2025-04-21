@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   ChakraProvider,
   Box,
@@ -65,15 +65,18 @@ const App = () => {
         });
       }
 
-      const routeOptions = await getOptimizedRoutes(remainingLocations, startPoint);
+      // Get optimized routes
+      const routeOptions = await getOptimizedRoutes([startPoint, ...remainingLocations], options.optimizationType);
       
       if (routeOptions) {
-        setRoutes(routeOptions);
+        setRoutes({
+          distanceOptimized: routeOptions,
+          weatherOptimized: routeOptions
+        });
         
-        const routeType = options.optimizationType === 'distance' ? 'distance-optimized' : 'weather-aware';
         toast({
           title: 'Route Generated',
-          description: `Created a ${routeType} route across ${routeOptions.distanceOptimized.numberOfDays} days.`,
+          description: `Created a ${options.optimizationType}-optimized route across ${routeOptions.summary.numberOfDays} days.`,
           status: 'success',
           duration: 5000,
           isClosable: true,

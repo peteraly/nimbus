@@ -106,6 +106,8 @@ const LocationSearch = ({
         id: suggestion.id,
         address: suggestion.place_name,
         coordinates: suggestion.geometry.coordinates,
+        lat: suggestion.geometry.coordinates[1],
+        lng: suggestion.geometry.coordinates[0]
       };
       await onLocationAdd(location);
       setSearchTerm('');

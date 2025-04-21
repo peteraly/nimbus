@@ -1,53 +1,104 @@
-# Drone Weather Route Planner
+# NIMUBS Dashboard
 
-A React application for planning drone routes with weather considerations using Mapbox services.
+A React-based dashboard application for route optimization with weather integration.
 
 ## Features
 
-- Interactive Mapbox integration
-- Multi-location route planning
-- Weather-based route optimization
-- Real-time weather data from OpenWeather
-- Address search and autocomplete
-- Route visualization with weather overlays
+- Route optimization with multiple waypoints
+- Weather forecasting for route locations
+- Interactive map visualization
+- Responsive design for all devices
+- Accessibility compliant
 
-## Prerequisites
+## Getting Started
+
+### Prerequisites
 
 - Node.js (v14 or higher)
 - npm or yarn
-- Mapbox access token
-- OpenWeather API key
 
-## Installation
+### Installation
 
-1. Clone the repository
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/nimubsdashboard.git
+   cd nimubsdashboard
+   ```
+
 2. Install dependencies:
-   ```bash
+   ```
    npm install
    ```
+
 3. Create a `.env` file in the root directory with the following variables:
    ```
-   REACT_APP_MAPBOX_ACCESS_TOKEN=your_mapbox_access_token
-   REACT_APP_MAPBOX_STYLE_URL=mapbox://styles/mapbox/streets-v12
-   REACT_APP_OPENWEATHER_API_KEY=your_openweather_api_key
+   REACT_APP_MAPBOX_TOKEN=your_mapbox_token
+   REACT_APP_WEATHER_API_KEY=your_weather_api_key
    ```
 
-## Usage
-
-1. Start the development server:
-   ```bash
+4. Start the development server:
+   ```
    npm start
    ```
-2. Open http://localhost:3000 in your browser
-3. Enter locations to plan your route
-4. View weather information and optimized routes
 
-## Mapbox Services Used
+## Development
 
-- Maps JavaScript API
-- Directions API
-- Geocoding API
-- Places API
+### Code Quality
+
+This project uses ESLint and Prettier for code quality and formatting:
+
+- Run linting:
+  ```
+  npm run lint
+  ```
+
+- Fix linting issues:
+  ```
+  npm run lint:fix
+  ```
+
+- Format code:
+  ```
+  npm run format
+  ```
+
+### Git Hooks
+
+The project uses Husky and lint-staged to run linting and formatting before commits.
+
+## Project Structure
+
+```
+nimubsdashboard/
+├── public/
+├── src/
+│   ├── components/
+│   │   ├── AddressInput.js
+│   │   ├── Map.js
+│   │   ├── RouteOptions.js
+│   │   └── WeatherForecast.js
+│   ├── pages/
+│   │   ├── Dashboard.js
+│   │   └── Settings.js
+│   ├── services/
+│   │   ├── mapService.js
+│   │   └── weatherService.js
+│   ├── utils/
+│   │   └── routeUtils.js
+│   ├── App.js
+│   └── index.js
+├── .env
+├── .eslintrc.js
+├── .prettierrc
+└── package.json
+```
+
+## API Keys
+
+This project requires the following API keys:
+
+- Mapbox API key for map and routing functionality
+- Weather API key for weather forecasting
 
 ## Contributing
 
@@ -63,11 +114,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- Mapbox
-- OpenWeather API
-- Chakra UI
-- React Community
-
-## Support
-
-For support, please open an issue in the GitHub repository or contact the maintainers. 
+- Mapbox for mapping and routing APIs
+- Weather API for weather forecasting
+- React and Chakra UI for the frontend framework 
