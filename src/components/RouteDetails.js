@@ -1,65 +1,79 @@
 import React from 'react';
 import {
   Box,
+  Text,
   VStack,
   HStack,
-  Text,
   Heading,
+  Divider,
+  Icon,
+  List,
+  ListItem,
   Accordion,
   AccordionItem,
   AccordionButton,
   AccordionPanel,
   AccordionIcon,
-  Icon,
   Badge,
-  Divider,
-  Tooltip
+  Tooltip,
+  Spacer,
+  useColorModeValue,
 } from '@chakra-ui/react';
-import { FaBed, FaGasPump, FaClock, FaSun, FaMoon, FaCoffee, FaExclamationTriangle } from 'react-icons/fa';
+import { FaUtensils, FaToilet, FaCar, FaParking } from 'react-icons/fa';
 import PropTypes from 'prop-types';
 import { formatTime, formatDuration } from '../utils/formatters';
+import { MIN_REST_DURATION_MINUTES } from '../services/routeService';
 
-const RestStop = ({ location, facilities, timeFromStart, distanceFromStart }) => (
-  <HStack spacing={4} p={2}>
-    <Icon as={FaCoffee} color="brown.500" />
+const RestStop = ({ stop }) => (
+  <HStack spacing={4} p={2} bg="gray.50" borderRadius="md">
+    <Icon as={FaUtensils} color="brown.500" />
     <VStack align="start" spacing={1}>
-      <Text fontWeight="bold">{location}</Text>
+      <Text fontWeight="bold">{stop.name}</Text>
       <Text fontSize="sm" color="gray.600">
-        {facilities.join(' • ')}
+        {stop.place_name}
+      </Text>
+      <Text fontSize="sm" color="gray.600">
+        {stop.facilities.join(' • ')}
       </Text>
     </VStack>
     <Spacer />
     <VStack align="end" spacing={1}>
-      <Text fontSize="sm">{formatDuration(timeFromStart)}</Text>
-      <Text fontSize="sm" color="gray.600">{distanceFromStart} mi</Text>
+      <Text fontSize="sm">{formatTime(stop.arrivalTime)}</Text>
+      <Text fontSize="sm" color="gray.600">
+        {formatDuration(MIN_REST_DURATION_MINUTES * 60)} rest
+      </Text>
     </VStack>
   </HStack>
 );
 
 RestStop.propTypes = {
-  location: PropTypes.string.isRequired,
-  facilities: PropTypes.arrayOf(PropTypes.string).isRequired,
-  timeFromStart: PropTypes.number.isRequired,
-  distanceFromStart: PropTypes.number.isRequired
+  stop: PropTypes.shape({
+    name: PropTypes.string.isRequired,
+    place_name: PropTypes.string.isRequired,
+    facilities: PropTypes.arrayOf(PropTypes.string).isRequired,
+    arrivalTime: PropTypes.instanceOf(Date).isRequired,
+  }).isRequired,
 };
 
-const DailyRouteDetails = ({ day, segments = [], startTime, endTime }) => {
-  if (!startTime || !endTime) return null;
+const DailyRouteDetails = ({ day, segment }) => {
+  if (!segment?.startTime || !segment?.endTime) return null;
 
-  const sunrise = new Date(startTime);
+  const sunrise = new Date(segment.startTime);
   sunrise.setHours(7, 0, 0, 0);
-  
-  const sunset = new Date(startTime);
-  sunset.setHours(19, 0, 0, 0);
 
-  // Ensure segments is always an array
-  const safeSegments = Array.isArray(segments) ? segments : [];
+  const sunset = new Date(segment.startTime);
+  sunset.setHours(19, 0, 0, 0);
 
   return (
     <AccordionItem>
       <AccordionButton>
         <Box flex="1" textAlign="left">
-          <Text fontWeight="bold">Day {day}</Text>
+          <HStack>
+            <Text fontWeight="bold">Day {day}</Text>
+            <Text color="gray.600">
+              ({segment.locations.length} locations, {Math.round(segment.distance / 1609.34)} mi)
+            </Text>
+          </HStack>
         </Box>
         <AccordionIcon />
       </AccordionButton>
@@ -67,104 +81,60 @@ const DailyRouteDetails = ({ day, segments = [], startTime, endTime }) => {
         <VStack spacing={4} align="stretch">
           {/* Daily Schedule */}
           <Box>
-            <Heading size="sm" mb={2}>Schedule</Heading>
+            <Heading size="sm" mb={2}>
+              Schedule
+            </Heading>
             <HStack spacing={4}>
               <HStack>
-                <Icon as={FaClock} />
-                <Text>Start: {formatTime(startTime)}</Text>
+                <Icon as={FaCar} />
+                <Text>Start: {formatTime(segment.startTime)}</Text>
               </HStack>
               <HStack>
-                <Icon as={FaClock} />
-                <Text>End: {formatTime(endTime)}</Text>
+                <Icon as={FaCar} />
+                <Text>End: {formatTime(segment.endTime)}</Text>
               </HStack>
             </HStack>
             <HStack mt={2}>
-              <Icon as={FaSun} color="yellow.500" />
+              <Icon as={FaCar} color="yellow.500" />
               <Text>Sunrise: {formatTime(sunrise)}</Text>
-              <Icon as={FaMoon} ml={4} />
+              <Icon as={FaCar} ml={4} />
               <Text>Sunset: {formatTime(sunset)}</Text>
             </HStack>
           </Box>
 
           <Divider />
 
-          {/* Rest Stops */}
-          {safeSegments.length > 0 && safeSegments.some(segment => segment?.restStop) && (
-            <>
-              <Box>
-                <Heading size="sm" mb={2}>Recommended Stops</Heading>
-                <VStack spacing={2} align="stretch">
-                  {safeSegments.map((segment, index) => (
-                    segment?.restStop && (
-                      <RestStop
-                        key={index}
-                        location={segment.restStop.name || `Stop ${index + 1}`}
-                        facilities={segment.restStop.facilities || []}
-                        timeFromStart={segment.timeFromStart || 0}
-                        distanceFromStart={segment.distanceFromStart || 0}
-                      />
-                    )
-                  ))}
-                </VStack>
-              </Box>
-              <Divider />
-            </>
-          )}
+          {/* Locations */}
+          <Box>
+            <Heading size="sm" mb={2}>
+              Locations
+            </Heading>
+            <VStack spacing={2} align="stretch">
+              {segment.locations.map((location, index) => (
+                <HStack key={index} p={2}>
+                  <Text fontWeight={index === 0 ? 'bold' : 'normal'}>
+                    {location.name || location.address}
+                  </Text>
+                </HStack>
+              ))}
+            </VStack>
+          </Box>
 
-          {/* Accommodation */}
-          {safeSegments.length > 0 && safeSegments[safeSegments.length - 1]?.accommodations?.length > 0 && (
+          {/* Rest Stops */}
+          {segment.restStops && segment.restStops.length > 0 && (
             <>
+              <Divider />
               <Box>
                 <Heading size="sm" mb={2}>
-                  <HStack>
-                    <Icon as={FaBed} />
-                    <Text>Recommended Accommodation</Text>
-                  </HStack>
+                  Recommended Stops
                 </Heading>
                 <VStack spacing={2} align="stretch">
-                  {safeSegments[safeSegments.length - 1].accommodations.map((hotel, index) => (
-                    <HStack key={index} spacing={4} p={2}>
-                      <VStack align="start" spacing={1}>
-                        <Text fontWeight="bold">{hotel.name || `Hotel ${index + 1}`}</Text>
-                        <Text fontSize="sm" color="gray.600">
-                          {hotel.distance || 0} mi from route • ${hotel.price || 'N/A'} avg/night
-                        </Text>
-                      </VStack>
-                    </HStack>
+                  {segment.restStops.map((stop, index) => (
+                    <RestStop key={index} stop={stop} />
                   ))}
                 </VStack>
               </Box>
-              <Divider />
             </>
-          )}
-
-          {/* Traffic & Alerts */}
-          {safeSegments.some(segment => segment?.alerts?.length > 0) && (
-            <Box>
-              <Heading size="sm" mb={2}>
-                <HStack>
-                  <Icon as={FaExclamationTriangle} />
-                  <Text>Traffic & Alerts</Text>
-                </HStack>
-              </Heading>
-              <VStack spacing={2} align="stretch">
-                {safeSegments.map((segment, index) => (
-                  segment?.alerts?.length > 0 && (
-                    <Box key={index} p={2}>
-                      <Text fontWeight="bold">{segment.name || `Location ${index + 1}`}</Text>
-                      {segment.alerts.map((alert, alertIndex) => (
-                        <HStack key={alertIndex} mt={1}>
-                          <Badge colorScheme={alert.severity === 'high' ? 'red' : 'yellow'}>
-                            {alert.type || 'Alert'}
-                          </Badge>
-                          <Text fontSize="sm">{alert.description || 'No description available'}</Text>
-                        </HStack>
-                      ))}
-                    </Box>
-                  )
-                ))}
-              </VStack>
-            </Box>
           )}
         </VStack>
       </AccordionPanel>
@@ -174,29 +144,38 @@ const DailyRouteDetails = ({ day, segments = [], startTime, endTime }) => {
 
 DailyRouteDetails.propTypes = {
   day: PropTypes.number.isRequired,
-  segments: PropTypes.array,
-  startTime: PropTypes.oneOfType([PropTypes.string, PropTypes.instanceOf(Date)]),
-  endTime: PropTypes.oneOfType([PropTypes.string, PropTypes.instanceOf(Date)])
+  segment: PropTypes.shape({
+    startTime: PropTypes.instanceOf(Date),
+    endTime: PropTypes.instanceOf(Date),
+    locations: PropTypes.arrayOf(
+      PropTypes.shape({
+        name: PropTypes.string,
+        address: PropTypes.string,
+      })
+    ),
+    restStops: PropTypes.arrayOf(
+      PropTypes.shape({
+        name: PropTypes.string,
+        place_name: PropTypes.string,
+        facilities: PropTypes.arrayOf(PropTypes.string),
+        arrivalTime: PropTypes.instanceOf(Date),
+      })
+    ),
+    distance: PropTypes.number,
+  }),
 };
 
 const RouteDetails = ({ route }) => {
   if (!route?.segments) return null;
 
-  // Ensure route.segments is an array
-  const safeSegments = Array.isArray(route.segments) ? route.segments : [];
-
   return (
     <Box borderWidth="1px" borderRadius="lg" p={4}>
-      <Heading size="md" mb={4}>Detailed Route Information</Heading>
+      <Heading size="md" mb={4}>
+        Route Details
+      </Heading>
       <Accordion allowMultiple>
-        {safeSegments.map((daySegment, index) => (
-          <DailyRouteDetails
-            key={index}
-            day={index + 1}
-            segments={daySegment?.segments || []}
-            startTime={daySegment?.startTime}
-            endTime={daySegment?.endTime}
-          />
+        {route.segments.map((segment, index) => (
+          <DailyRouteDetails key={index} day={index + 1} segment={segment} />
         ))}
       </Accordion>
     </Box>
@@ -205,30 +184,8 @@ const RouteDetails = ({ route }) => {
 
 RouteDetails.propTypes = {
   route: PropTypes.shape({
-    segments: PropTypes.arrayOf(PropTypes.shape({
-      startTime: PropTypes.instanceOf(Date),
-      endTime: PropTypes.instanceOf(Date),
-      segments: PropTypes.arrayOf(PropTypes.shape({
-        name: PropTypes.string,
-        restStop: PropTypes.shape({
-          name: PropTypes.string,
-          facilities: PropTypes.arrayOf(PropTypes.string),
-        }),
-        timeFromStart: PropTypes.number,
-        distanceFromStart: PropTypes.number,
-        alerts: PropTypes.arrayOf(PropTypes.shape({
-          type: PropTypes.string,
-          severity: PropTypes.string,
-          description: PropTypes.string,
-        })),
-        accommodations: PropTypes.arrayOf(PropTypes.shape({
-          name: PropTypes.string,
-          distance: PropTypes.number,
-          price: PropTypes.number,
-        })),
-      })),
-    })),
+    segments: PropTypes.arrayOf(PropTypes.object),
   }),
 };
 
-export default RouteDetails; 
+export default RouteDetails;
