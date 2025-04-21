@@ -10,12 +10,18 @@ import {
   Heading,
   Text,
   useToast,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from '@chakra-ui/react';
 import LocationSearch from './components/LocationSearch';
 import WeatherForecast from './components/WeatherForecast';
 import RouteDetails from './components/RouteDetails';
 import RouteMap from './components/RouteMap';
 import RouteOptions from './components/RouteOptions';
+import CRMDashboard from './components/CRMDashboard';
 import { getOptimizedRoutes } from './services/routeService';
 import { getWeatherData } from './services/weatherService';
 
@@ -185,47 +191,62 @@ const App = () => {
           <VStack spacing={8} align="stretch">
             <Box textAlign="center">
               <Heading as="h1" size="xl" mb={2}>
-                Drone Weather Route Planner
+                NIMUBS Dashboard
               </Heading>
               <Text fontSize="lg" color={useColorModeValue('gray.600', 'gray.400')}>
-                Plan your drone routes with weather-aware optimization
+                Comprehensive solution for route planning and customer management
               </Text>
             </Box>
 
-            <Grid templateColumns={{ base: '1fr', lg: 'repeat(2, 1fr)' }} gap={8}>
-              <VStack spacing={6} align="stretch">
-                <LocationSearch
-                  onLocationAdd={handleLocationAdd}
-                  onLocationRemove={handleLocationRemove}
-                  locations={locations}
-                  loading={loading}
-                />
-                <WeatherForecast
-                  locations={locations}
-                  selectedLocation={selectedLocation}
-                  onLocationChange={setSelectedLocation}
-                />
-                <RouteOptions
-                  locations={locations}
-                  selectedStartPoint={selectedStartPoint}
-                  onStartPointChange={setSelectedStartPoint}
-                  onOptimize={optimizeRoute}
-                />
-              </VStack>
+            <Tabs isFitted variant="enclosed">
+              <TabList mb="1em">
+                <Tab>Route Planner</Tab>
+                <Tab>CRM Dashboard</Tab>
+              </TabList>
 
-              <VStack spacing={6} align="stretch">
-                <RouteMap
-                  locations={locations}
-                  routes={routes}
-                  selectedLocation={selectedLocation}
-                  onLocationSelect={setSelectedLocation}
-                />
-                <RouteDetails
-                  route={routes.weatherOptimized || routes.distanceOptimized}
-                  loading={loading}
-                />
-              </VStack>
-            </Grid>
+              <TabPanels>
+                <TabPanel>
+                  <Grid templateColumns={{ base: '1fr', lg: 'repeat(2, 1fr)' }} gap={8}>
+                    <VStack spacing={6} align="stretch">
+                      <LocationSearch
+                        onLocationAdd={handleLocationAdd}
+                        onLocationRemove={handleLocationRemove}
+                        locations={locations}
+                        loading={loading}
+                      />
+                      <WeatherForecast
+                        locations={locations}
+                        selectedLocation={selectedLocation}
+                        onLocationChange={setSelectedLocation}
+                      />
+                      <RouteOptions
+                        locations={locations}
+                        selectedStartPoint={selectedStartPoint}
+                        onStartPointChange={setSelectedStartPoint}
+                        onOptimize={optimizeRoute}
+                      />
+                    </VStack>
+
+                    <VStack spacing={6} align="stretch">
+                      <RouteMap
+                        locations={locations}
+                        routes={routes}
+                        selectedLocation={selectedLocation}
+                        onLocationSelect={setSelectedLocation}
+                      />
+                      <RouteDetails
+                        route={routes.weatherOptimized || routes.distanceOptimized}
+                        loading={loading}
+                      />
+                    </VStack>
+                  </Grid>
+                </TabPanel>
+
+                <TabPanel>
+                  <CRMDashboard />
+                </TabPanel>
+              </TabPanels>
+            </Tabs>
           </VStack>
         </Container>
       </Box>
